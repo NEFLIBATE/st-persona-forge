@@ -1,4 +1,4 @@
-import { THEMES, GENDERS, DETAIL_GROUPS, DETAIL_FIELDS, getDetails, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, parseModelResult, toNativeBackup, parseImport, safeFilename, requestGeneration } from './core.js';
+import { THEMES, GENDERS, DETAIL_GROUPS, DETAIL_FIELDS, getDetails, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, toNativeBackup, parseImport, safeFilename, requestGeneration, parseGenerationResult, getGenerationBudget } from './core.js';
 
 const KEY = 'st_persona_forge_v1';
 const context = () => globalThis.SillyTavern.getContext();
@@ -12,7 +12,7 @@ const field = (id, label, placeholder = '', max = 500) => `<label class="pf-fiel
 
 function settings() {
     const c = context();
-    const defaults = { form: { ...DEFAULT_FORM }, current: { name: '', title: '', description: '' }, drafts: [] };
+    const defaults = { form: { ...DEFAULT_FORM }, current: { name: '', title: '', description: '' }, drafts: [], lastOutput: '', lastOutputAt: '', lastOutputNote: '' };
     let stored = c.extensionSettings[KEY];
     if (!stored || typeof stored !== 'object' || Array.isArray(stored)) stored = defaults;
     stored.form = { ...DEFAULT_FORM, ...stored.form };
@@ -22,6 +22,9 @@ function settings() {
     }
     stored.form.details = getDetails(stored.form);
     stored.current = { ...defaults.current, ...stored.current };
+    stored.lastOutput = typeof stored.lastOutput === 'string' ? stored.lastOutput.slice(0, 100000) : '';
+    stored.lastOutputAt = typeof stored.lastOutputAt === 'string' ? stored.lastOutputAt : '';
+    stored.lastOutputNote = typeof stored.lastOutputNote === 'string' ? stored.lastOutputNote : '';
     stored.drafts = Array.isArray(stored.drafts) ? stored.drafts.slice(0, 50) : [];
     c.extensionSettings[KEY] = stored;
     return stored;
@@ -41,6 +44,23 @@ function restoreDetailInputs() {
     syncDetailCounter();
 }
 function persist() { context().saveSettingsDebounced(); }
+function renderModelOutput() {
+    $('raw-output').value = state.lastOutput;
+    $('raw-info').textContent = state.lastOutputAt ? `保存于 ${new Date(state.lastOutputAt).toLocaleString()}${state.lastOutputNote ? ' · ' + state.lastOutputNote : ''}` : '尚无模型输出。';
+}
+function rememberModelOutput(result) {
+    let raw;
+    try { raw = typeof result === 'string' ? result : result == null ? '' : JSON.stringify(result, null, 2); }
+    catch { raw = String(result); }
+    state.lastOutput = String(raw ?? '').slice(0, 100000);
+    state.lastOutputAt = new Date().toISOString();
+    state.lastOutputNote = raw?.length > 100000 ? '原始输出过长，仅保留前100000字符。' : '';
+    renderModelOutput(); persist();
+}
+function noteModelOutput(message) {
+    state.lastOutputNote = [state.lastOutputNote, message].filter(Boolean).join(' ');
+    renderModelOutput(); persist();
+}
 function queueSave() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 400); }
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('pf-error', error); }
 function report(error) { console.error('[Persona Forge]', error); status(error.message || String(error), true); }
@@ -126,12 +146,19 @@ async function generate() {
         character = { name: ch.name, description: ch.data?.description || ch.description, scenario: ch.data?.scenario || ch.scenario };
     }
     const prompt = buildPrompt(form, current.name && current.description ? current : null, character);
-    const length = { short: 900, standard: 1800, detailed: 3000, dossier: 5000 }[form.length] || 1800;
+    const length = getGenerationBudget(form.length);
     setBusy(true); status('正在使用酒馆当前连接生成，请稍候。可关闭窗口，结果会保留。');
+    let received = false;
     try {
         const result = await requestGeneration(c, form.mode, prompt, length);
-        const persona = parseModelResult(result, form.name || current.name);
-        replaceEditor(persona); snapshot(persona); revealEditor(); status('生成完成。可以继续修改，再新增到酒馆或导出。');
+        rememberModelOutput(result); received = true;
+        const parsed = parseGenerationResult(result, form.name || current.name);
+        if (parsed.warning) noteModelOutput(parsed.warning);
+        replaceEditor(parsed.persona); snapshot(parsed.persona); revealEditor();
+        status(parsed.warning || '生成完成。可以继续修改，再新增到酒馆或导出。', parsed.partial);
+    } catch (error) {
+        if (received) noteModelOutput(error.message || String(error));
+        throw error;
     } finally { setBusy(false); }
 }
 async function placeholderAvatar(name) {
@@ -222,7 +249,7 @@ function initialize() {
     state = settings();
     const pageHost = document.createElement('div'); pageHost.id = 'pf-host';
     const shadow = pageHost.attachShadow({ mode: 'open' });
-    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.3.0', import.meta.url).href;
+    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.3.1', import.meta.url).href;
     const critical = document.createElement('style');
     critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#151722;color:#efedf5}dialog#pf-overlay[hidden]{display:none!important}';
     shadow.append(critical, sheet);
@@ -256,8 +283,9 @@ function initialize() {
       <label class="pf-check"><input id="pf-activate" type="checkbox">新增后切换为当前用户设定</label>
       <div class="pf-actions">${button('install', '新增到酒馆', 'pf-primary')}${button('save', '保存草稿')}${button('copy', '复制描述')}</div>
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
+      <details class="pf-details" id="pf-model-output"><summary>上次模型原始输出</summary><p class="pf-muted">遇到格式异常时可查看或下载，用于找回模型已经生成的内容。最多保留100000字符。</p><p class="pf-muted" id="pf-raw-info"></p><textarea id="pf-raw-output" rows="5" readonly aria-label="上次模型原始输出"></textarea><div class="pf-actions">${button('download-output', '下载原始输出')}</div></details>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.3.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.3.1</span></footer>
     </section>`;
     for (const [key, theme] of Object.entries(THEMES)) $('theme').add(new Option(theme[0], key));
     for (const gender of GENDERS) $('gender').add(new Option(gender === '自由设定' ? '不指定' : gender, gender));
@@ -273,7 +301,7 @@ function initialize() {
     }
     restoreDetailInputs();
     for (const id of ['out-name', 'out-title', 'description']) $(id).addEventListener('input', syncEditor);
-    setEditor(state.current); renderDrafts();
+    setEditor(state.current); renderDrafts(); renderModelOutput();
     const on = (id, action) => $(id).addEventListener('click', () => guard(action));
     on('close', close);
     on('clear-details', () => {
@@ -290,6 +318,10 @@ function initialize() {
     on('new', () => { snapshot(readEditor()); setEditor({}); $('name').value = ''; state.form.name = ''; clearAvatar(); persist(); goToPart('create'); status('已新建，上一份有效内容已存入草稿。'); });
     on('save', () => { snapshot(normalizePersona(readEditor())); status('已保存草稿。'); });
     on('refresh', refreshPersonas);
+    on('download-output', () => {
+        if (!state.lastOutput) throw new Error('尚无可下载的模型输出。');
+        download(state.lastOutput, 'persona-forge_model_output.txt', 'text/plain;charset=utf-8');
+    });
     on('load-existing', async () => {
         const key = $('existing').value; if (!key) throw new Error('请先选择一个用户设定。');
         const power = await powerSettings(); const descriptor = power.persona_descriptions?.[key] || {};
