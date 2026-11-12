@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { THEMES } from '../core.js';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const base=fileURLToPath(new URL('../', import.meta.url));
@@ -12,7 +13,7 @@ const artifacts=await fs.mkdtemp(path.join(tmpdir(), 'persona-forge-ui-'));
 const mock = `
 window.fixture={failAI:false,failUpload:false,selected:'original',saves:0,requests:[]};
 const power={personas:{original:'原有用户'},persona_descriptions:{original:{description:'原有设定内容',title:'原设定'}},default_persona:'original'};
-const c={powerUserSettings:power,extensionSettings:{},onlineStatus:'connected',characters:[{name:'对手角色',description:'CHARACTER SECRET',scenario:'world'}],characterId:0,getRequestHeaders:()=>({'Content-Type':'application/json','X-CSRF-Token':'test'}),saveSettingsDebounced:()=>fixture.saves++,eventTypes:{APP_READY:'ready'},eventSource:{on:(_e,fn)=>queueMicrotask(fn)},SlashCommand:{fromProps:x=>x},SlashCommandParser:{addCommandObject:x=>window.command=x},generateRaw:async(options={})=>{fixture.requests.push(options);if(fixture.failAI)throw new Error('模拟模型连接失败');return JSON.stringify({name:'AI 林澈',title:'生成结果',description:'由AI生成的完整用户设定 {{user}} 与 {{char}}。'});},generateQuietPrompt:async(options={})=>{fixture.requests.push(options);return JSON.stringify({name:'上下文用户',description:'chat result'});}};
+const c={powerUserSettings:power,extensionSettings:{st_persona_forge_v1:{form:{gender:'旧版自填性别'}}},onlineStatus:'connected',characters:[{name:'对手角色',description:'CHARACTER SECRET',scenario:'world'}],characterId:0,getRequestHeaders:()=>({'Content-Type':'application/json','X-CSRF-Token':'test'}),saveSettingsDebounced:()=>fixture.saves++,eventTypes:{APP_READY:'ready'},eventSource:{on:(_e,fn)=>queueMicrotask(fn)},SlashCommand:{fromProps:x=>x},SlashCommandParser:{addCommandObject:x=>window.command=x},generateRaw:async(options={})=>{fixture.requests.push(options);if(fixture.failAI)throw new Error('模拟模型连接失败');return JSON.stringify({name:'AI 林澈',title:'生成结果',description:'由AI生成的完整用户设定 {{user}} 与 {{char}}。'});},generateQuietPrompt:async(options={})=>{fixture.requests.push(options);return JSON.stringify({name:'上下文用户',description:'chat result'});}};
 window.SillyTavern={getContext:()=>c};window.fixture.power=power;
 `;
 const pm = `export async function initPersona(id,name,description,title){fixture.power.personas[id]=name;fixture.power.persona_descriptions[id]={description,title};} export async function getUserAvatars(){return Object.keys(fixture.power.personas);}export async function setUserAvatar(id){fixture.selected=id;}`;
@@ -39,6 +40,22 @@ await page.route('**/api/avatars/upload',async route=>{
 try {
  await page.goto(`http://127.0.0.1:${server.address().port}`);
  await page.getByText('打开用户设定生成器',{exact:true}).click();
+ // Old free-text values survive migration to the new gender selector.
+ assert.equal(await page.locator('#pf-gender').inputValue(),'自定义');
+ assert.equal(await page.locator('#pf-genderCustom').inputValue(),'旧版自填性别');
+ assert.equal(await page.locator('#pf-gender-custom-field').isVisible(),true);
+ await page.locator('#pf-gender').selectOption('女');
+ assert.equal(await page.locator('#pf-gender-custom-field').isVisible(),false);
+ assert.equal(await page.locator('#pf-theme option').count(),20);
+ for(const [key, theme] of Object.entries(THEMES)){
+  await page.locator('#pf-theme').selectOption(key);await page.locator('#pf-template').click();
+  const description=await page.locator('#pf-description').inputValue();
+  assert.ok(description.includes(theme[0]));assert.ok(description.includes('性别：女'));assert.ok(!description.includes('称谓'));
+ }
+ await page.locator('#pf-gender').selectOption('自定义');
+ await page.locator('#pf-genderCustom').fill('流体性别');await page.locator('#pf-template').click();
+ assert.ok((await page.locator('#pf-description').inputValue()).includes('性别：流体性别'));
+ await page.locator('#pf-gender').selectOption('女');await page.locator('#pf-theme').selectOption('modern');
  await page.locator('#pf-template').click();
  assert.ok((await page.locator('#pf-description').inputValue()).length>200);
  await page.locator('#pf-out-name').fill('林澈');
@@ -64,7 +81,7 @@ try {
  assert.equal(await page.locator('#pf-description').inputValue(),prior);
  await page.evaluate(()=>fixture.failAI=false);await page.locator('#pf-generate').click();await page.locator('#pf-status').filter({hasText:'生成完成'}).waitFor();
  assert.equal(await page.locator('#pf-out-name').inputValue(),'AI 林澈');
- const request=await page.evaluate(()=>fixture.requests.at(-1));assert.ok(!request.prompt.includes('CHARACTER SECRET'));
+ const request=await page.evaluate(()=>fixture.requests.at(-1));assert.ok(!request.prompt.includes('CHARACTER SECRET'));assert.ok(request.prompt.includes('\"性别\": \"女\"'));assert.ok(!request.prompt.includes('称谓'));
  // Import HTML-looking content only as textarea text.
  await page.locator('#pf-file').setInputFiles({name:'test.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({name:'<img src=x onerror=alert(1)>',description:'<script>window.hacked=true</script> {{user}}'}))});
  await page.locator('#pf-status').filter({hasText:'已读取1条'}).waitFor();assert.equal(await page.evaluate(()=>window.hacked),undefined);
@@ -105,5 +122,5 @@ try {
  assert.equal(await page.locator('#pf-page-content').evaluate(el=>el.scrollTop),0);
  await page.keyboard.press('Escape');assert.equal(await page.locator('#pf-overlay').isVisible(),false);
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({passed:true,artifacts,checks:['desktop mount','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
+ console.log(JSON.stringify({passed:true,artifacts,checks:['desktop mount','20 selectable world templates','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
 } catch(e){console.log(await page.locator('#pf-status').textContent());console.log(await page.evaluate(()=>fixture.requests));console.log(errors);await page.screenshot({path:path.join(artifacts, 'fullpage-failure.png')});throw e;} finally {await browser.close();server.close();}
