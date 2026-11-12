@@ -4,6 +4,7 @@ const KEY = 'st_persona_forge_v1';
 const context = () => globalThis.SillyTavern.getContext();
 let root, state, busy = false, imageFile = null, imageURL = '', previousFocus, personaModule;
 let saveTimer;
+let scrollLocks = null;
 const $ = id => root.querySelector(`#pf-${id}`);
 const button = (id, label, cls = '') => `<button type="button" id="pf-${id}" class="pf-button ${cls}">${label}</button>`;
 const field = (id, label, placeholder = '', max = 500) => `<label class="pf-field"><span>${label}</span><input id="pf-${id}" maxlength="${max}" placeholder="${placeholder}"></label>`;
@@ -50,7 +51,7 @@ function replaceEditor(persona) { snapshot(readEditor()); setEditor(persona); }
 function setBusy(value) {
     busy = value;
     root.querySelectorAll('input,select,textarea,button').forEach(el => {
-        if (!['pf-close', 'pf-open-help'].includes(el.id)) el.disabled = value;
+        if (!['pf-close', 'pf-open-help', 'pf-nav-create', 'pf-nav-editor', 'pf-nav-drafts'].includes(el.id)) el.disabled = value;
     });
     root.setAttribute('aria-busy', String(value));
     $('generate').textContent = value ? '正在生成…' : '✦ AI 生成／完善';
@@ -85,7 +86,7 @@ function renderDrafts() {
         const load = document.createElement('button'); load.type = 'button'; load.className = 'pf-draft-load';
         const name = document.createElement('strong'); name.textContent = item.persona.name;
         const date = document.createElement('small'); date.textContent = new Date(item.date).toLocaleString();
-        load.append(name, date); load.addEventListener('click', () => { if (busy) return; guard(() => { replaceEditor(normalizePersona(item.persona)); status('已载入草稿。'); }); });
+        load.append(name, date); load.addEventListener('click', () => { if (busy) return; guard(() => { replaceEditor(normalizePersona(item.persona)); goToPart('editor'); status('已载入草稿。'); }); });
         const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'pf-button pf-small'; remove.textContent = '删除';
         remove.addEventListener('click', () => { if (busy) return; state.drafts = state.drafts.filter(x => x.id !== item.id); persist(); renderDrafts(); });
         row.append(load, remove); list.append(row);
@@ -110,7 +111,7 @@ async function generate() {
     try {
         const result = await requestGeneration(c, form.mode, prompt, length);
         const persona = parseModelResult(result, form.name || current.name);
-        replaceEditor(persona); snapshot(persona); status('生成完成。可以继续修改，再新增到酒馆或导出。');
+        replaceEditor(persona); snapshot(persona); revealEditor(); status('生成完成。可以继续修改，再新增到酒馆或导出。');
     } finally { setBusy(false); }
 }
 async function placeholderAvatar(name) {
@@ -161,21 +162,60 @@ async function installPersona() {
         throw error;
     } finally { setBusy(false); }
 }
+function syncViewport() {
+    root.style.setProperty('--pf-viewport-height', `${Math.round(window.visualViewport?.height || window.innerHeight)}px`);
+}
+function goToPart(part) {
+    const target = $(part === 'drafts' ? 'draft-section' : `${part}-section`);
+    if (part === 'drafts') target.open = true;
+    const scroller = $('page-content');
+    scroller.scrollTo({ top: target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop, behavior: 'instant' });
+    root.querySelectorAll('.pf-nav button').forEach(button => button.setAttribute('aria-current', String(button.id === `pf-nav-${part}`)));
+}
+function revealEditor() { if (window.matchMedia('(max-width: 760px)').matches) goToPart('editor'); }
 function open() {
+    if (root.open) return;
     previousFocus = document.activeElement;
+    syncViewport();
+    scrollLocks = [document.documentElement, document.body].map(element => ({ element, value: element.style.getPropertyValue('overflow'), priority: element.style.getPropertyPriority('overflow') }));
+    for (const lock of scrollLocks) lock.element.style.setProperty('overflow', 'hidden', 'important');
     root.hidden = false; root.classList.remove('pf-hidden');
-    refreshPersonas(); $('close').focus();
+    if (typeof root.showModal === 'function') root.showModal();
+    else root.setAttribute('open', '');
+    $('page-content').scrollTop = 0;
+    const connected = context().onlineStatus && context().onlineStatus !== 'no_connection';
+    $('connection').textContent = connected ? '模型已连接' : '未连接模型 · 可用模板';
+    refreshPersonas(); $('close').focus({ preventScroll: true });
 }
 function close() {
-    syncEditor(); persist(); root.hidden = true; root.classList.add('pf-hidden'); previousFocus?.focus?.();
+    syncEditor(); persist();
+    if (typeof root.close === 'function') root.close(); else root.removeAttribute('open');
+    root.hidden = true; root.classList.add('pf-hidden');
+    for (const lock of scrollLocks || []) {
+        if (lock.value) lock.element.style.setProperty('overflow', lock.value, lock.priority);
+        else lock.element.style.removeProperty('overflow');
+    }
+    scrollLocks = null; previousFocus?.focus?.({ preventScroll: true });
 }
 function initialize() {
-    if (document.getElementById('pf-overlay')) return;
+    if (document.getElementById('pf-host')) return;
     state = settings();
-    root = document.createElement('div'); root.id = 'pf-overlay'; root.className = 'pf-hidden'; root.hidden = true;
-    root.innerHTML = `<section class="pf-window" role="dialog" aria-modal="true" aria-labelledby="pf-heading">
-      <header class="pf-header"><div><div class="pf-eyebrow">PERSONA FORGE / 用户设定工坊</div><h2 id="pf-heading">让你的身份，成为故事起点。</h2><p>从一个想法开始，创作由你扮演的人物。</p></div>${button('close', '关闭 ×', 'pf-close')}</header>
-      <div class="pf-body"><div class="pf-controls">
+    const pageHost = document.createElement('div'); pageHost.id = 'pf-host';
+    const shadow = pageHost.attachShadow({ mode: 'open' });
+    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.1.0', import.meta.url).href;
+    const critical = document.createElement('style');
+    critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#151722;color:#efedf5}dialog#pf-overlay[hidden]{display:none!important}';
+    shadow.append(critical, sheet);
+    root = document.createElement('dialog'); root.id = 'pf-overlay'; root.className = 'pf-hidden'; root.hidden = true;
+    root.setAttribute('aria-labelledby', 'pf-heading');
+    shadow.append(root); document.body.append(pageHost);
+    window.visualViewport?.addEventListener('resize', syncViewport);
+    window.addEventListener('resize', syncViewport);
+    root.addEventListener('cancel', event => { event.preventDefault(); close(); });
+    root.innerHTML = `<section class="pf-window">
+      <header class="pf-header"><div><div class="pf-eyebrow">PERSONA FORGE / 用户设定工坊</div><h2 id="pf-heading">用户设定工坊</h2><p>创建自己的故事身份 <span id="pf-connection" class="pf-connection"></span></p></div>${button('close', '返回酒馆 ×', 'pf-close')}</header>
+      <nav class="pf-nav" aria-label="页面导航">${button('nav-create', '01 创作设定')}${button('nav-editor', '02 编辑与导出')}${button('nav-drafts', '草稿架')}</nav>
+      <div class="pf-body" id="pf-page-content"><div class="pf-controls" id="pf-create-section">
       <div class="pf-section-heading"><span>01 / 创作方向</span><small>空白项交给 AI</small></div>
       <div class="pf-grid"><label class="pf-field"><span>世界题材</span><select id="pf-theme"></select></label>${field('name', '姓名', '留空则自动取名', 120)}${field('age', '年龄', '例如：25', 80)}${field('gender', '性别／称谓', '自由设定', 100)}</div>
       ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}
@@ -183,10 +223,10 @@ function initialize() {
       <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option></select></label></div>
       <details class="pf-details"><summary>生成参考与连接</summary><label class="pf-field"><span>生成模式</span><select id="pf-mode"><option value="raw">独立创作（不读取聊天）</option><option value="chat">沿用当前聊天上下文与预设</option></select></label><label class="pf-check"><input id="pf-characterContext" type="checkbox">参考当前单人聊天的角色卡</label><p class="pf-muted">AI 使用酒馆当前连接和模型参数。上下文模式会把当前聊天、用户设定等参考内容发送给该模型；独立模式不会主动读取聊天。</p></details>
       <div class="pf-actions">${button('generate', '✦ AI 生成／完善', 'pf-primary')}${button('template', '免 API 中文模板')}</div>
-      <p class="pf-muted">AI 生成会参考右侧已有内容。想从头创作时，先点“新建设定”。</p>
+      <p class="pf-muted">AI 生成会参考编辑器已有内容。想从头创作时，先点“新建设定”。</p>
       <details class="pf-details"><summary>从酒馆读取已有用户设定</summary><select id="pf-existing" aria-label="已有用户设定"></select><div class="pf-actions">${button('load-existing', '读取到编辑器')}${button('refresh', '刷新列表')}</div><p class="pf-muted">读取后可完善并保存为新设定。</p></details>
-      <details class="pf-details"><summary>草稿架 <span id="pf-draft-count">0/50</span></summary><div id="pf-drafts"></div></details>
-      </div><div class="pf-editor">
+      <details class="pf-details" id="pf-draft-section"><summary>草稿架 <span id="pf-draft-count">0/50</span></summary><div id="pf-drafts"></div></details>
+      </div><div class="pf-editor" id="pf-editor-section">
       <div class="pf-section-heading"><span>02 / 你的用户设定</span>${button('new', '新建设定', 'pf-small')}</div>
       <div class="pf-grid">${field('out-name', '设定姓名', '用于酒馆显示', 120)}${field('out-title', '列表标签', '可选，例如：现代 · 旧友', 160)}</div>
       <label class="pf-field pf-description-field"><span>设定描述 <small id="pf-count">0 字符</small></span><textarea id="pf-description" maxlength="${MAX_DESCRIPTION}" placeholder="生成的设定会出现在这里，也可以直接粘贴或手动编写。支持 {{user}} 和 {{char}} 宏。"></textarea></label>
@@ -195,9 +235,8 @@ function initialize() {
       <div class="pf-actions">${button('install', '新增到酒馆', 'pf-primary')}${button('save', '保存草稿')}${button('copy', '复制描述')}</div>
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.0.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.1.0</span></footer>
     </section>`;
-    document.body.append(root);
     for (const [key, theme] of Object.entries(THEMES)) $('theme').add(new Option(theme[0], key));
     for (const key of Object.keys(DEFAULT_FORM)) {
         const el = $(key); if (!el) continue;
@@ -207,16 +246,18 @@ function initialize() {
     for (const id of ['out-name', 'out-title', 'description']) $(id).addEventListener('input', syncEditor);
     setEditor(state.current); renderDrafts();
     const on = (id, action) => $(id).addEventListener('click', () => guard(action));
-    on('close', close); on('generate', generate); on('install', installPersona);
-    on('template', () => { replaceEditor(makeTemplate(state.form)); status('已载入中文模板，可编辑后保存，或让 AI 进一步完善。'); });
-    on('new', () => { snapshot(readEditor()); setEditor({}); $('name').value = ''; state.form.name = ''; clearAvatar(); persist(); status('已新建，上一份有效内容已存入草稿。'); });
+    on('close', close);
+    for (const part of ['create', 'editor', 'drafts']) on(`nav-${part}`, () => goToPart(part));
+    on('generate', generate); on('install', installPersona);
+    on('template', () => { replaceEditor(makeTemplate(state.form)); revealEditor(); status('已载入中文模板，可编辑后保存，或让 AI 进一步完善。'); });
+    on('new', () => { snapshot(readEditor()); setEditor({}); $('name').value = ''; state.form.name = ''; clearAvatar(); persist(); goToPart('create'); status('已新建，上一份有效内容已存入草稿。'); });
     on('save', () => { snapshot(normalizePersona(readEditor())); status('已保存草稿。'); });
     on('refresh', refreshPersonas);
     on('load-existing', async () => {
         const key = $('existing').value; if (!key) throw new Error('请先选择一个用户设定。');
         const power = await powerSettings(); const descriptor = power.persona_descriptions?.[key] || {};
         replaceEditor({ name: power.personas[key], title: descriptor.title || '', description: descriptor.description || '' });
-        $('name').value = power.personas[key]; state.form.name = power.personas[key]; queueSave(); clearAvatar();
+        $('name').value = power.personas[key]; state.form.name = power.personas[key]; queueSave(); clearAvatar(); revealEditor();
         status('已读取为草稿；新增时会创建另一份用户设定。头像可另行选择。');
     });
     on('copy', async () => {
@@ -233,7 +274,7 @@ function initialize() {
         const items = parseImport(await file.text()); if (!items.length) throw new Error('文件中没有可导入设定。');
         snapshot(readEditor());
         for (const p of items.slice().reverse()) snapshot(p);
-        setEditor(items[0]); clearAvatar(); status(`已读取${items.length}条设定到草稿（最多保留50条），首条已载入编辑器。尚未新增到酒馆。`);
+        setEditor(items[0]); clearAvatar(); revealEditor(); status(`已读取${items.length}条设定到草稿（最多保留50条），首条已载入编辑器。尚未新增到酒馆。`);
     }));
     $('avatar').addEventListener('change', () => guard(async () => {
         const file = $('avatar').files[0]; if (!file) return;
@@ -249,8 +290,8 @@ function initialize() {
         if (e.key === 'Tab') {
             const focusable = [...root.querySelectorAll('button,input,textarea,select,summary')].filter(el => !el.disabled && el.getClientRects().length);
             const first = focusable[0], last = focusable.at(-1);
-            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+            if (e.shiftKey && root.getRootNode().activeElement === first) { e.preventDefault(); last?.focus(); }
+            else if (!e.shiftKey && root.getRootNode().activeElement === last) { e.preventDefault(); first?.focus(); }
         }
     });
     const host = document.querySelector('#extensions_settings2') || document.querySelector('#extensions_settings');
