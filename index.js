@@ -1,10 +1,11 @@
-import { THEMES, GENDERS, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, parseModelResult, toNativeBackup, parseImport, safeFilename, requestGeneration } from './core.js';
+import { THEMES, GENDERS, DETAIL_GROUPS, DETAIL_FIELDS, getDetails, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, parseModelResult, toNativeBackup, parseImport, safeFilename, requestGeneration } from './core.js';
 
 const KEY = 'st_persona_forge_v1';
 const context = () => globalThis.SillyTavern.getContext();
 let root, state, busy = false, imageFile = null, imageURL = '', previousFocus, personaModule;
 let saveTimer;
 let scrollLocks = null;
+let detailUndo = null;
 const $ = id => root.querySelector(`#pf-${id}`);
 const button = (id, label, cls = '') => `<button type="button" id="pf-${id}" class="pf-button ${cls}">${label}</button>`;
 const field = (id, label, placeholder = '', max = 500) => `<label class="pf-field"><span>${label}</span><input id="pf-${id}" maxlength="${max}" placeholder="${placeholder}"></label>`;
@@ -19,12 +20,26 @@ function settings() {
         stored.form.genderCustom = typeof stored.form.gender === 'string' ? stored.form.gender : '';
         stored.form.gender = stored.form.genderCustom ? '自定义' : '自由设定';
     }
+    stored.form.details = getDetails(stored.form);
     stored.current = { ...defaults.current, ...stored.current };
     stored.drafts = Array.isArray(stored.drafts) ? stored.drafts.slice(0, 50) : [];
     c.extensionSettings[KEY] = stored;
     return stored;
 }
 function syncGenderField() { $('gender-custom-field').hidden = $('gender').value !== '自定义'; }
+function detailPanel() {
+    return `<section class="pf-detail-panel" aria-labelledby="pf-detail-heading"><div class="pf-detail-heading"><strong id="pf-detail-heading">人物细节</strong><small id="pf-detail-count">0/${DETAIL_FIELDS.length}</small>${button('clear-details', '清空细节', 'pf-small')}</div><p class="pf-muted">按需展开填写。已填写的事实会优先保留；留空部分交给 AI 创作。</p>${DETAIL_GROUPS.map(group => `<details class="pf-details" id="pf-detail-group-${group.id}"><summary>${group.label} <small id="pf-detail-count-${group.id}"></small></summary>${group.fields.map(([key, label, placeholder]) => `<label class="pf-field"><span>${label}</span><textarea id="pf-detail-${key}" rows="2" maxlength="1000" placeholder="${placeholder}"></textarea></label>`).join('')}</details>`).join('')}</section>`;
+}
+function syncDetailCounter() {
+    const values = getDetails(state.form);
+    $('detail-count').textContent = `${Object.keys(values).length}/${DETAIL_FIELDS.length} 已填写`;
+    for (const group of DETAIL_GROUPS) $('detail-count-' + group.id).textContent = `${group.fields.filter(([key]) => values[key]).length}/${group.fields.length}`;
+    $('clear-details').textContent = detailUndo ? '撤销清空' : '清空细节';
+}
+function restoreDetailInputs() {
+    for (const [key] of DETAIL_FIELDS) $('detail-' + key).value = state.form.details[key] || '';
+    syncDetailCounter();
+}
 function persist() { context().saveSettingsDebounced(); }
 function queueSave() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 400); }
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('pf-error', error); }
@@ -111,7 +126,7 @@ async function generate() {
         character = { name: ch.name, description: ch.data?.description || ch.description, scenario: ch.data?.scenario || ch.scenario };
     }
     const prompt = buildPrompt(form, current.name && current.description ? current : null, character);
-    const length = { short: 900, standard: 1800, detailed: 3000 }[form.length] || 1800;
+    const length = { short: 900, standard: 1800, detailed: 3000, dossier: 5000 }[form.length] || 1800;
     setBusy(true); status('正在使用酒馆当前连接生成，请稍候。可关闭窗口，结果会保留。');
     try {
         const result = await requestGeneration(c, form.mode, prompt, length);
@@ -207,7 +222,7 @@ function initialize() {
     state = settings();
     const pageHost = document.createElement('div'); pageHost.id = 'pf-host';
     const shadow = pageHost.attachShadow({ mode: 'open' });
-    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.2.0', import.meta.url).href;
+    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.3.0', import.meta.url).href;
     const critical = document.createElement('style');
     critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#151722;color:#efedf5}dialog#pf-overlay[hidden]{display:none!important}';
     shadow.append(critical, sheet);
@@ -226,7 +241,8 @@ function initialize() {
       <label class="pf-field" id="pf-gender-custom-field" hidden><span>自定义性别</span><input id="pf-genderCustom" maxlength="100" placeholder="填写性别，或留空由 AI 设定"></label>
       ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}
       <label class="pf-field"><span>背景、能力与其他要求</span><textarea id="pf-keywords" rows="3" maxlength="4000" placeholder="想保留的经历、弱点、目标、世界规则…"></textarea></label>
-      <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option></select></label></div>
+      ${detailPanel()}
+      <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option><option value="dossier">完整档案</option></select></label></div>
       <details class="pf-details"><summary>生成参考与连接</summary><label class="pf-field"><span>生成模式</span><select id="pf-mode"><option value="raw">独立创作（不读取聊天）</option><option value="chat">沿用当前聊天上下文与预设</option></select></label><label class="pf-check"><input id="pf-characterContext" type="checkbox">参考当前单人聊天的角色卡</label><p class="pf-muted">AI 使用酒馆当前连接和模型参数。上下文模式会把当前聊天、用户设定等参考内容发送给该模型；独立模式不会主动读取聊天。</p></details>
       <div class="pf-actions">${button('generate', '✦ AI 生成／完善', 'pf-primary')}${button('template', '免 API 中文模板')}</div>
       <p class="pf-muted">AI 生成会参考编辑器已有内容。想从头创作时，先点“新建设定”。</p>
@@ -241,7 +257,7 @@ function initialize() {
       <div class="pf-actions">${button('install', '新增到酒馆', 'pf-primary')}${button('save', '保存草稿')}${button('copy', '复制描述')}</div>
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.2.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.3.0</span></footer>
     </section>`;
     for (const [key, theme] of Object.entries(THEMES)) $('theme').add(new Option(theme[0], key));
     for (const gender of GENDERS) $('gender').add(new Option(gender === '自由设定' ? '不指定' : gender, gender));
@@ -251,10 +267,23 @@ function initialize() {
         el.addEventListener('input', () => { state.form[key] = el.type === 'checkbox' ? el.checked : el.value; if (key === 'gender') syncGenderField(); queueSave(); });
     }
     syncGenderField();
+    for (const [key] of DETAIL_FIELDS) {
+        const el = $('detail-' + key);
+        el.addEventListener('input', () => { state.form.details[key] = el.value; detailUndo = null; syncDetailCounter(); queueSave(); });
+    }
+    restoreDetailInputs();
     for (const id of ['out-name', 'out-title', 'description']) $(id).addEventListener('input', syncEditor);
     setEditor(state.current); renderDrafts();
     const on = (id, action) => $(id).addEventListener('click', () => guard(action));
     on('close', close);
+    on('clear-details', () => {
+        if (detailUndo) { state.form.details = { ...detailUndo }; detailUndo = null; status('已恢复清空前的人物细节。'); }
+        else {
+            if (!Object.keys(getDetails(state.form)).length) { status('人物细节尚未填写。'); return; }
+            detailUndo = { ...state.form.details }; state.form.details = {}; status('已清空细节，点击“撤销清空”可以恢复。编辑器内容已保留。');
+        }
+        restoreDetailInputs(); persist();
+    });
     for (const part of ['create', 'editor', 'drafts']) on(`nav-${part}`, () => goToPart(part));
     on('generate', generate); on('install', installPersona);
     on('template', () => { replaceEditor(makeTemplate(state.form)); revealEditor(); status('已载入中文模板，可编辑后保存，或让 AI 进一步完善。'); });

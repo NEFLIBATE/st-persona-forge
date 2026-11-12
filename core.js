@@ -21,7 +21,45 @@ export const THEMES = {
     beastfolk: ['兽人奇幻', '往返不同族群聚落的旅行信使', '友善、独立、善于察觉情绪变化', '因一封跨越边境的信件结识的同行者', '数个聚落的信件里都提到同一个被遗忘的地名'],
 };
 export const GENDERS = Object.freeze(['自由设定', '男', '女', '非二元', '无性别', '自定义']);
-export const DEFAULT_FORM = Object.freeze({ theme: 'modern', name: '', age: '25', gender: '自由设定', genderCustom: '', identity: '', traits: '', relation: '', keywords: '', language: '简体中文', length: 'standard', mode: 'raw', characterContext: false });
+export const DETAIL_GROUPS = [
+    { id: 'appearance', label: '外貌与气质', fields: [
+        ['species', '种族／血统', '例如：普通人类、半精灵、狐族'],
+        ['build', '身高与体型', '例如：身高172cm，身形修长，常年运动'],
+        ['features', '五官与外貌特征', '例如：黑发灰瞳，左眉有浅疤，笑时有梨涡'],
+        ['clothing', '服饰与配饰', '例如：素色长衣、旧银戒，习惯把袖口挽起'],
+        ['presence', '声音与气质', '例如：声音偏低，语速平稳，初见有距离感'],
+    ] },
+    { id: 'personality', label: '性格与生活习惯', fields: [
+        ['likes', '喜好与兴趣', '例如：雨天、旧书、研究陌生地方的食物'],
+        ['dislikes', '反感与禁忌', '例如：被人擅自替自己做决定'],
+        ['habits', '小动作与日常习惯', '例如：思考时转动戒指，紧张时会整理袖口'],
+        ['values', '价值观与底线', '例如：可以妥协利益，但不会出卖信任自己的人'],
+        ['fears', '恐惧与敏感点', '例如：害怕失去掌控，遇到离别话题容易回避'],
+        ['speech', '说话方式与口头习惯', '例如：用词简洁，熟悉后会开冷玩笑，不爱说教'],
+    ] },
+    { id: 'history', label: '成长经历与社会关系', fields: [
+        ['origin', '出生地与成长环境', '例如：在边城长大，小时候跟随亲人四处迁居'],
+        ['family', '家庭与重要关系', '例如：与姐姐关系亲近，有一位多年未见的导师'],
+        ['turningPoint', '重要经历与转折', '例如：一次未能守约的经历改变了对承诺的态度'],
+        ['secret', '不轻易透露的秘密', '例如：正在寻找失踪的旧友，不愿公开真正目的'],
+        ['reputation', '他人眼中的形象', '例如：旁人觉得可靠冷静，熟人知道其实很心软'],
+    ] },
+    { id: 'abilities', label: '能力、弱点与随身资源', fields: [
+        ['skills', '技能与擅长领域', '例如：药理、野外辨路、整理线索，不擅长正面战斗'],
+        ['weaknesses', '弱点、限制与代价', '例如：体力普通；使用能力后需要休息，不能连续发动'],
+        ['possessions', '随身物品与资源', '例如：磨旧的笔记本、一小袋药材、有限的旅费'],
+    ] },
+    { id: 'story', label: '目标、互动与剧情线索', fields: [
+        ['shortGoal', '当前的短期目标', '例如：在陌生城市找到稳定住处和一份工作'],
+        ['longGoal', '长期愿望', '例如：查明家人离开的原因，重新选择自己的生活'],
+        ['conflict', '内心矛盾', '例如：渴望被理解，却又害怕依赖别人'],
+        ['trust', '建立信任的方式', '例如：更相信长期行动，关系需要循序渐进'],
+        ['boundaries', '互动边界与相处偏好', '例如：保留独立空间，不接受擅自触碰私人物品'],
+        ['hooks', '可展开的剧情钩子', '例如：一封迟到多年的信、一件被认出的旧物'],
+    ] },
+];
+export const DETAIL_FIELDS = DETAIL_GROUPS.flatMap(group => group.fields);
+export const DEFAULT_FORM = Object.freeze({ theme: 'modern', name: '', age: '25', gender: '自由设定', genderCustom: '', identity: '', traits: '', relation: '', keywords: '', details: Object.freeze({}), language: '简体中文', length: 'standard', mode: 'raw', characterContext: false });
 export const MAX_DESCRIPTION = 50000;
 const text = (value, max = 4000) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 export const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -62,28 +100,51 @@ export function getGender(form) {
     const selected = text(form.gender, 100);
     return (selected === '自定义' ? text(form.genderCustom, 100) : selected) || '自由设定';
 }
+export function getDetails(form) {
+    const source = form?.details;
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return {};
+    return Object.fromEntries(DETAIL_FIELDS.map(([key]) => [key, text(source[key], 1000)]).filter(([, value]) => value));
+}
 export function makeTemplate(form) {
     const theme = THEMES[form.theme] || THEMES.modern;
     const names = ['林澈', '沈予安', '顾行舟', '苏见微', '许星遥', '温知夏'];
     const name = text(form.name, 120) || names[Math.floor(Math.random() * names.length)];
     const identity = text(form.identity) || theme[1], traits = text(form.traits) || theme[2], relation = text(form.relation) || theme[3];
+    const details = getDetails(form);
+    const detailLines = keys => keys.filter(key => details[key]).map(key => `${DETAIL_FIELDS.find(field => field[0] === key)[1]}：${details[key]}`);
+    const section = (heading, lines) => `【${heading}】\n${lines.join('\n')}`;
+    const description = [
+        `姓名：${name}\n年龄：${text(form.age, 80) || '成年'}\n性别：${getGender(form)}\n身份：${identity}`,
+        section('外貌与气质', Object.keys(details).some(key => ['species', 'build', 'features', 'clothing', 'presence'].includes(key))
+            ? detailLines(['species', 'build', 'features', 'clothing', 'presence'])
+            : ['穿着与身份和活动环境相符，随身携带与职业有关的小物件；交谈前常会先观察周围环境。']),
+        section('性格与日常', [`性格：${traits}。`, ...detailLines(['likes', 'dislikes', 'habits', 'values', 'fears'])]),
+        section('经历与关系', [`生活背景：在${theme[0]}的世界中生活，有自己的工作、交往圈与尚未解决的牵挂。`, ...detailLines(['origin', 'family', 'turningPoint', 'secret', 'reputation']), `与{{char}}的关系：${relation}。关系发展由互动决定。`]),
+        section('能力与资源', [`技能与擅长领域：${details.skills || '擅长与自身职业有关的技能，能够处理日常工作中的具体问题。'}`, `弱点、限制与代价：${details.weaknesses || '不具备超出身份背景的万能知识；遇到不熟悉的领域需要求助或学习。'}`, ...detailLines(['possessions'])]),
+        section('目标与剧情', [`当前的短期目标：${details.shortGoal || '处理眼前的生活与工作问题，寻找下一步的落脚点。'}`, `长期愿望：${details.longGoal || '维持独立的生活，逐步解决心中尚未放下的牵挂。'}`, `内心矛盾：${details.conflict || '希望保有自己的节奏，同时必须面对新的责任与关系。'}`, `可展开的剧情钩子：${details.hooks || theme[4]}`]),
+        section('说话与互动', [`说话方式与口头习惯：${details.speech || '表达自然具体，熟悉后带少量玩笑，情绪紧张时句子会变短。'}`, ...detailLines(['trust', 'boundaries'])]),
+        ...(text(form.keywords) ? [section('补充要求', [text(form.keywords)])] : []),
+        '扮演边界：{{user}}是由玩家扮演的人物。不要替玩家决定台词、行动或内心感受；不要预设{{char}}的意愿、感情或关系结果。',
+    ].join('\n\n');
     return {
         name, title: `${theme[0]} · ${identity}`.slice(0, 160),
-        description: `姓名：${name}\n年龄：${text(form.age, 80) || '成年'}\n性别：${getGender(form)}\n身份：${identity}\n\n外貌与举止：穿着以方便行动为主，随身携带与职业有关的小物件；交谈前常会先观察周围环境。\n性格：${traits}。面对陌生人保持分寸，建立信任后愿意表达真实想法。\n能力与局限：擅长与自身职业有关的技能，但不会无所不能；压力过大时容易独自承担问题。\n背景：在${theme[0]}的世界中生活，有自己的日常工作、亲友与尚未解决的遗憾。\n目标与矛盾：希望维持独立的生活，同时必须面对新的责任与关系。\n与{{char}}的关系：${relation}。关系发展由互动决定。\n剧情线索：${theme[4]}。\n说话方式：表达自然具体，熟悉后带少量玩笑，情绪紧张时句子会变短。${text(form.keywords) ? `\n补充设定：${text(form.keywords)}` : ''}\n\n扮演边界：{{user}}是由玩家扮演的人物。不要替玩家决定台词、行动或内心感受；不要预设{{char}}的意愿、感情或关系结果。`,
+        description,
     };
 }
 export function buildPrompt(form, current, character = null) {
     const theme = THEMES[form.theme]?.[0] || '自由题材';
-    const lengths = { short: '约200至350字', standard: '约500至800字', detailed: '约1000至1400字' };
+    const lengths = { short: '约200至350字', standard: '约500至800字', detailed: '约1000至1400字', dossier: '约1800至2200字' };
+    const details = getDetails(form);
     const request = {
         题材: theme, 姓名: text(form.name, 120) || '请创作合适姓名', 年龄: text(form.age, 80), 性别: getGender(form),
         身份: text(form.identity), 性格: text(form.traits), 与对方关系: text(form.relation), 补充要求: text(form.keywords),
+        人物细节: Object.fromEntries(DETAIL_FIELDS.filter(([key]) => details[key]).map(([key, label]) => [label, details[key]])),
         输出语言: text(form.language, 80) || '简体中文', 目标长度: lengths[form.length] || lengths.standard,
     };
     const refs = [];
     if (current?.description) refs.push(`已有草稿（保留其中明确设定，按新要求完善）：\n${JSON.stringify(normalizePersona(current))}`);
     if (character) refs.push(`对手角色参考（只用于世界观和关系适配，不要复制成用户身份）：\n${JSON.stringify({ name: text(character.name, 120), description: text(character.description, 6000), scenario: text(character.scenario, 3000) })}`);
-    return `请为SillyTavern编写用户设定（Persona），这是玩家扮演的身份。按下列创作需求生成可直接放入“用户设定描述”的内容。\n${JSON.stringify(request, null, 2)}\n${refs.join('\n\n')}\n要求：包含外貌、性格、背景、目标、能力局限、说话习惯、关系与可展开的剧情线索。尊重用户明确指定的姓名、年龄、性别等，不把空白字段当成强制条件。不替玩家决定即时行动、台词或内心独白，不强制对方角色爱上或服从玩家。用{{user}}代表此Persona，用{{char}}代表对方角色。不要写角色卡开场白。只输出一个JSON对象：{"name":"姓名","title":"列表中的简短标签","description":"完整设定描述，可用\\n换行"}。JSON字段值必须是字符串，不要代码围栏或额外解释。`;
+    return `请为SillyTavern编写用户设定（Persona），这是玩家扮演的身份。按下列创作需求生成可直接放入“用户设定描述”的内容。\n${JSON.stringify(request, null, 2)}\n${refs.join('\n\n')}\n要求：包含外貌、性格、背景、目标、能力局限、说话习惯、关系与可展开的剧情线索。尊重用户明确指定的姓名、年龄、性别与人物细节；本次表单明确填写的要求与旧稿冲突时，以本次要求为准。空白项允许合理创作，但不要把示例占位文字当作设定。让经历、习惯、弱点和目标相互关联，给出可观察的小动作与具体限制，避免重复堆砌形容词或无缘由的万能能力。秘密不代表对方角色已经知情；关系发展与互动边界不预设即时剧情结果。篇幅较短时压缩表达，优先保留用户填写的事实。不替玩家决定即时行动、台词或内心独白，不强制对方角色爱上或服从玩家。用{{user}}代表此Persona，用{{char}}代表对方角色。不要写角色卡开场白。只输出一个JSON对象：{"name":"姓名","title":"列表中的简短标签","description":"完整设定描述，可用\\n换行"}。JSON字段值必须是字符串，不要代码围栏或额外解释。`;
 }
 export function toNativeBackup(persona, avatarId = `persona-forge-${uid()}.png`) {
     const p = normalizePersona(persona);

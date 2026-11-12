@@ -38,3 +38,11 @@
 }
 @media(max-width:340px){#pf-overlay h2{font-size:19px}#pf-overlay .pf-grid{gap:8px}#pf-overlay .pf-header{padding-left:12px;padding-right:12px}#pf-overlay .pf-close{padding:7px;font-size:10px}}
 @media(prefers-reduced-motion:reduce){#pf-overlay *{transition:none!important}}
+
+#pf-overlay .pf-detail-panel{border:1px solid var(--pf-line);border-radius:10px;padding:14px;margin:4px 0 18px;background:#191c28}
+#pf-overlay .pf-detail-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--pf-accent)}
+#pf-overlay .pf-detail-heading small{color:var(--pf-muted);font-size:11px}#pf-overlay .pf-detail-heading .pf-button{margin-left:auto}
+#pf-overlay .pf-detail-panel>.pf-muted{margin-top:10px}#pf-overlay .pf-detail-panel .pf-details{padding:10px 0 3px}
+#pf-overlay .pf-detail-panel summary{font-size:13px;color:var(--pf-text)}#pf-overlay .pf-detail-panel summary small{float:right;color:var(--pf-muted);font-size:11px;margin-top:3px}
+#pf-overlay .pf-detail-panel textarea{min-height:76px}#pf-overlay .pf-detail-panel .pf-field:last-child{margin-bottom:8px}
+@media(max-width:760px){#pf-overlay .pf-detail-panel{padding:12px}#pf-overlay .pf-detail-panel textarea{font-size:16px;min-height:84px}}
