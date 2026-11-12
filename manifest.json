@@ -1,0 +1,13 @@
+{
+  "display_name": "用户设定工坊 · Persona Forge",
+  "loading_order": 50,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "YIMIN",
+  "version": "1.0.0",
+  "minimum_client_version": "1.13.0",
+  "auto_update": false,
+  "homePage": "https://github.com/NEFLIBATE/st-persona-forge"
+}
