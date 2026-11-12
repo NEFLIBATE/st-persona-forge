@@ -1,4 +1,4 @@
-import { THEMES, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, parseModelResult, toNativeBackup, parseImport, safeFilename, requestGeneration } from './core.js';
+import { THEMES, GENDERS, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, parseModelResult, toNativeBackup, parseImport, safeFilename, requestGeneration } from './core.js';
 
 const KEY = 'st_persona_forge_v1';
 const context = () => globalThis.SillyTavern.getContext();
@@ -15,11 +15,16 @@ function settings() {
     let stored = c.extensionSettings[KEY];
     if (!stored || typeof stored !== 'object' || Array.isArray(stored)) stored = defaults;
     stored.form = { ...DEFAULT_FORM, ...stored.form };
+    if (!GENDERS.includes(stored.form.gender)) {
+        stored.form.genderCustom = typeof stored.form.gender === 'string' ? stored.form.gender : '';
+        stored.form.gender = stored.form.genderCustom ? '自定义' : '自由设定';
+    }
     stored.current = { ...defaults.current, ...stored.current };
     stored.drafts = Array.isArray(stored.drafts) ? stored.drafts.slice(0, 50) : [];
     c.extensionSettings[KEY] = stored;
     return stored;
 }
+function syncGenderField() { $('gender-custom-field').hidden = $('gender').value !== '自定义'; }
 function persist() { context().saveSettingsDebounced(); }
 function queueSave() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 400); }
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('pf-error', error); }
@@ -202,7 +207,7 @@ function initialize() {
     state = settings();
     const pageHost = document.createElement('div'); pageHost.id = 'pf-host';
     const shadow = pageHost.attachShadow({ mode: 'open' });
-    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.1.0', import.meta.url).href;
+    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.2.0', import.meta.url).href;
     const critical = document.createElement('style');
     critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#151722;color:#efedf5}dialog#pf-overlay[hidden]{display:none!important}';
     shadow.append(critical, sheet);
@@ -217,7 +222,8 @@ function initialize() {
       <nav class="pf-nav" aria-label="页面导航">${button('nav-create', '01 创作设定')}${button('nav-editor', '02 编辑与导出')}${button('nav-drafts', '草稿架')}</nav>
       <div class="pf-body" id="pf-page-content"><div class="pf-controls" id="pf-create-section">
       <div class="pf-section-heading"><span>01 / 创作方向</span><small>空白项交给 AI</small></div>
-      <div class="pf-grid"><label class="pf-field"><span>世界题材</span><select id="pf-theme"></select></label>${field('name', '姓名', '留空则自动取名', 120)}${field('age', '年龄', '例如：25', 80)}${field('gender', '性别／称谓', '自由设定', 100)}</div>
+      <div class="pf-grid"><label class="pf-field"><span>世界题材</span><select id="pf-theme"></select></label>${field('name', '姓名', '留空则自动取名', 120)}${field('age', '年龄', '例如：25', 80)}<label class="pf-field"><span>性别</span><select id="pf-gender"></select></label></div>
+      <label class="pf-field" id="pf-gender-custom-field" hidden><span>自定义性别</span><input id="pf-genderCustom" maxlength="100" placeholder="填写性别，或留空由 AI 设定"></label>
       ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}
       <label class="pf-field"><span>背景、能力与其他要求</span><textarea id="pf-keywords" rows="3" maxlength="4000" placeholder="想保留的经历、弱点、目标、世界规则…"></textarea></label>
       <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option></select></label></div>
@@ -235,14 +241,16 @@ function initialize() {
       <div class="pf-actions">${button('install', '新增到酒馆', 'pf-primary')}${button('save', '保存草稿')}${button('copy', '复制描述')}</div>
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.1.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.2.0</span></footer>
     </section>`;
     for (const [key, theme] of Object.entries(THEMES)) $('theme').add(new Option(theme[0], key));
+    for (const gender of GENDERS) $('gender').add(new Option(gender === '自由设定' ? '不指定' : gender, gender));
     for (const key of Object.keys(DEFAULT_FORM)) {
         const el = $(key); if (!el) continue;
         if (el.type === 'checkbox') el.checked = Boolean(state.form[key]); else el.value = state.form[key];
-        el.addEventListener('input', () => { state.form[key] = el.type === 'checkbox' ? el.checked : el.value; queueSave(); });
+        el.addEventListener('input', () => { state.form[key] = el.type === 'checkbox' ? el.checked : el.value; if (key === 'gender') syncGenderField(); queueSave(); });
     }
+    syncGenderField();
     for (const id of ['out-name', 'out-title', 'description']) $(id).addEventListener('input', syncEditor);
     setEditor(state.current); renderDrafts();
     const on = (id, action) => $(id).addEventListener('click', () => guard(action));
