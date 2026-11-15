@@ -22,7 +22,7 @@ try{
  if(req.url==='/'){res.setHeader('Content-Type','text/html');res.end(`<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/scripts/extensions/third-party/st-persona-forge/style.css"></head><body style="margin:0;background:#eee;transform:translateZ(0);font-size:30px"><style>input,textarea,select{background:#fff8ed!important;color:#2b241b!important;font-size:32px!important}dialog{max-height:450px!important;margin:40px!important}section{max-height:500px!important}</style><div id="extensions_settings2"></div><script>${mock}</script><script type="module" src="/scripts/extensions/third-party/st-persona-forge/index.js"></script></body></html>`);return;}
  if(req.url==='/scripts/personas.js'){res.setHeader('Content-Type','text/javascript');res.end(pm);return;}
  const prefix='/scripts/extensions/third-party/st-persona-forge/';
- if(req.url.startsWith(prefix)) {const file=req.url.slice(prefix.length).split('?')[0];if(!['index.js','core.js','style.css'].includes(file)){res.statusCode=404;res.end();return;}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':'text/javascript');res.end(await fs.readFile(base+'/'+file));return;}
+ if(req.url.startsWith(prefix)) {const file=req.url.slice(prefix.length).split('?')[0];if(!['index.js','core.js','catalog.js','style.css'].includes(file)){res.statusCode=404;res.end();return;}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':'text/javascript');res.end(await fs.readFile(base+'/'+file));return;}
  res.statusCode=404;res.end();
 }catch(e){res.statusCode=500;res.end(String(e));}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -46,7 +46,7 @@ try {
  assert.equal(await page.locator('#pf-gender-custom-field').isVisible(),true);
  await page.locator('#pf-gender').selectOption('女');
  assert.equal(await page.locator('#pf-gender-custom-field').isVisible(),false);
- assert.equal(await page.locator('#pf-theme option').count(),20);
+ assert.equal(await page.locator('#pf-theme option').count(),Object.keys(THEMES).length);
  for(const [key, theme] of Object.entries(THEMES)){
   await page.locator('#pf-theme').selectOption(key);await page.locator('#pf-template').click();
   const description=await page.locator('#pf-description').inputValue();
@@ -56,6 +56,58 @@ try {
  await page.locator('#pf-genderCustom').fill('流体性别');await page.locator('#pf-template').click();
  assert.ok((await page.locator('#pf-description').inputValue()).includes('性别：流体性别'));
  await page.locator('#pf-gender').selectOption('女');await page.locator('#pf-theme').selectOption('modern');
+ // The catalogue offers search, theme recommendations, multi-select and custom worlds.
+ await page.locator('#pf-identity-picker > summary').click();
+ await page.locator('#pf-identity-options').getByRole('button',{name:'咖啡师',exact:true}).click();
+ assert.equal(await page.locator('#pf-identity').inputValue(),'咖啡师');
+ await page.locator('#pf-theme').selectOption('space');
+ assert.equal(await page.locator('#pf-identity').inputValue(),'咖啡师');
+ assert.equal(await page.locator('#pf-identity-options').getByRole('button',{name:'咖啡师',exact:true}).count(),0);
+ await page.locator('#pf-identity-search').fill('飞船');
+ await page.locator('#pf-identity-options').getByRole('button',{name:'飞船领航员',exact:true}).click();
+ assert.equal(await page.locator('#pf-identity').inputValue(),'飞船领航员');
+ await page.locator('#pf-identity-category').selectOption('all');
+ await page.locator('#pf-identity-search').fill('no-such-option');
+ assert.match(await page.locator('#pf-identity-results').textContent(),/没有匹配/);
+ assert.equal(await page.locator('#pf-identity').inputValue(),'飞船领航员');
+ await page.locator('#pf-identity-search').fill('');
+ assert.equal(await page.locator('#pf-identity-options button').count(),36);
+ await page.locator('#pf-identity-more').click();
+ assert.equal(await page.locator('#pf-identity-options button').count(),72);
+ await page.locator('#pf-identity-category').selectOption('ancient');
+ assert.equal(await page.locator('#pf-identity-options button').count(),12);
+ await page.locator('#pf-identity-picker > summary').click();
+ await page.locator('#pf-traits').fill('自定义气质');
+ await page.locator('#pf-traits-picker > summary').click();
+ await page.locator('#pf-traits-search').fill('慢热');
+ const traitButton = page.locator('#pf-traits-options').getByRole('button',{name:'慢热',exact:true});
+ await traitButton.click();assert.equal(await page.locator('#pf-traits').inputValue(),'自定义气质、慢热');
+ assert.equal(await traitButton.getAttribute('aria-pressed'),'true');
+ await traitButton.click();assert.equal(await page.locator('#pf-traits').inputValue(),'自定义气质');
+ await traitButton.click();
+ await page.locator('#pf-traits-picker > summary').click();
+ await page.locator('#pf-relation-picker > summary').click();
+ await page.locator('#pf-relation-category').selectOption('rivals');
+ await page.locator('#pf-relation-options').getByRole('button',{name:'同一行业的竞争者',exact:true}).click();
+ assert.equal(await page.locator('#pf-relation').inputValue(),'同一行业的竞争者');
+ await page.locator('#pf-relation-picker > summary').click();
+ await page.locator('#pf-theme').selectOption('custom');
+ assert.equal(await page.locator('#pf-theme-custom-field').isVisible(),true);
+ await page.locator('#pf-themeCustom').fill('海底古城与蒸汽机械');
+ await page.locator('#pf-template').click();
+ const customDescription=await page.locator('#pf-description').inputValue();
+ for(const fact of ['海底古城与蒸汽机械','飞船领航员','自定义气质','慢热','同一行业的竞争者'])assert.ok(customDescription.includes(fact));
+ await page.locator('#pf-generate').click();await page.locator('#pf-status').filter({hasText:'生成完成'}).waitFor();
+ const customRequest=await page.evaluate(()=>fixture.requests.at(-1).prompt);
+ for(const fact of ['海底古城与蒸汽机械','飞船领航员','自定义气质','慢热','同一行业的竞争者'])assert.ok(customRequest.includes(fact));
+ await page.locator('#pf-close').click();await page.getByText('打开用户设定生成器',{exact:true}).click();
+ assert.equal(await page.locator('#pf-themeCustom').inputValue(),'海底古城与蒸汽机械');
+ assert.equal(await page.locator('#pf-identity').inputValue(),'飞船领航员');
+ assert.equal(await page.locator('#pf-traits').inputValue(),'自定义气质、慢热');
+ assert.equal(await page.locator('#pf-relation').inputValue(),'同一行业的竞争者');
+ await page.locator('#pf-theme').selectOption('modern');
+ assert.equal(await page.locator('#pf-theme-custom-field').isVisible(),false);
+ await page.locator('#pf-identity').fill('');await page.locator('#pf-traits').fill('');await page.locator('#pf-relation').fill('');
  // Old detail facts migrate intact. Filters are views, never generation exclusions.
  assert.equal(await page.locator('#pf-detail-features').inputValue(),'旧版灰瞳');
  assert.equal(await page.locator('#pf-detail-count').textContent(),`2/${DETAIL_FIELDS.length} 已填写`);
@@ -168,6 +220,13 @@ try {
  for(const size of [{width:360,height:800},{width:393,height:760},{width:320,height:568},{width:800,height:360}]){
   await page.setViewportSize(size);
   await page.locator('#pf-nav-create').click();
+  await page.locator('#pf-identity-picker > summary').click();
+  await page.locator('#pf-identity-category').selectOption('special');
+  await page.locator('#pf-identity-options').getByRole('button',{name:'意外穿越的外来者',exact:true}).click();
+  assert.equal(await page.locator('#pf-identity').inputValue(),'意外穿越的外来者');
+  assert.equal(await page.locator('.pf-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  if(size.width===393)await page.screenshot({path:path.join(artifacts,'fullpage-mobile-picker.png')});
+  await page.locator('#pf-identity-picker > summary').click();
   assert.equal(await page.locator('.pf-window').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
   assert.equal(await page.locator('.pf-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
   const rect=await page.locator('#pf-overlay').boundingBox();assert.ok(Math.abs(rect.height-size.height)<=1);assert.equal(rect.y,0);
@@ -190,5 +249,5 @@ try {
  assert.equal(await page.locator('#pf-page-content').evaluate(el=>el.scrollTop),0);
  await page.keyboard.press('Escape');assert.equal(await page.locator('#pf-overlay').isVisible(),false);
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({passed:true,artifacts,checks:['marker text generation','truncated JSON recovery and warning','malformed JSON recovery','invalid response preserves editor','raw response persistence and download','one model call per click','120 optional detail inputs','facts in template and AI request','detail clear and undo','detail persistence','full dossier length','desktop mount','20 selectable world templates','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
+ console.log(JSON.stringify({passed:true,artifacts,checks:['marker text generation','truncated JSON recovery and warning','malformed JSON recovery','invalid response preserves editor','raw response persistence and download','one model call per click','120 optional detail inputs','facts in template and AI request','detail clear and undo','detail persistence','full dossier length','desktop mount','64 selectable world templates plus custom','192 professions','120 multi-select traits','120 relationship options','search, categories and more choices','theme recommendations preserve user input','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
 } catch(e){console.log(await page.locator('#pf-status').textContent());console.log(await page.evaluate(()=>fixture.requests));console.log(errors);await page.screenshot({path:path.join(artifacts, 'fullpage-failure.png')});throw e;} finally {await browser.close();server.close();}

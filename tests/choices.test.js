@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { THEMES, GENDERS, DEFAULT_FORM, getGender, makeTemplate, buildPrompt } from '../core.js';
 
-test('expanded world catalogue offers at least twenty distinct usable templates', () => {
+test('expanded world catalogue offers at least sixty-four distinct usable templates', () => {
     const labels = Object.values(THEMES).map(theme => theme[0]);
-    assert.ok(labels.length >= 20);
+    assert.ok(labels.length >= 64);
     assert.equal(new Set(labels).size, labels.length);
     for (const [theme, data] of Object.entries(THEMES)) {
         const persona = makeTemplate({ ...DEFAULT_FORM, theme, gender: '女' });
