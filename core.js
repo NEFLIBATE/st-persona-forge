@@ -1,25 +1,5 @@
-export const THEMES = {
-    modern: ['现代日常', '都市里经营旧书店的青年', '观察敏锐、慢热、偶尔冷幽默', '熟人介绍后初次见面', '旧书店的收购通知让平静生活出现裂缝'],
-    fantasy: ['西幻冒险', '失去行会庇护的旅行药剂师', '谨慎、好奇、重视承诺', '临时组成探险队的同伴', '一张残缺的药方指向被封锁的遗迹'],
-    xianxia: ['修仙江湖', '离开山门独自行走的医修', '外柔内韧、护短、有原则', '曾受对方帮助，尚未偿还人情', '师门旧案与一味失传灵药渐渐产生关联'],
-    campus: ['校园青春', '重返大学攻读研究生的学生', '独立、认真、熟悉后很健谈', '共同负责社团项目的搭档', '一份匿名投稿使尘封的校园往事浮出水面'],
-    scifi: ['科幻赛博', '太空港的民用设备维修师', '务实、机警、嘴硬心软', '在一次紧急维修中结识的委托人', '一枚来源不明的储存芯片被误送到工作台'],
-    historical: ['古风权谋', '边城小商号的账房', '温和有礼、善于记忆、保持戒心', '互有试探的合作伙伴', '账簿中一笔反复出现的支出牵涉城中权贵'],
-    mystery: ['悬疑调查', '追查旧案的自由摄影师', '敏感、执着、习惯先观察再行动', '因同一条线索相识的调查伙伴', '多年以前拍摄的一张底片出现了不应存在的人'],
-    wuxia: ['武侠江湖', '护送旧物远行的年轻镖师', '直率、重情义、懂得变通', '因一趟护送任务结识的同行者', '镖物中夹藏的半封旧信牵出江湖悬案'],
-    cyberpunk: ['赛博都市', '下城区的独立义体维修师', '机敏、务实、对熟人很讲义气', '交换情报的长期合作伙伴', '一枚被注销身份的义体芯片仍在发出求救信号'],
-    space: ['星际远航', '民用探测船的航行记录员', '好奇、耐心、习惯用记录整理思绪', '在边境空间站结识的船员', '一段不属于现有星图的坐标出现在航行日志里'],
-    apocalypse: ['末日求生', '临时避难所的物资协调员', '冷静、节俭、在原则问题上执拗', '在撤离途中互相照应的幸存者', '一批迟迟未到的补给突然从废弃城区发出定位'],
-    wasteland: ['废土重建', '游走聚落之间的净水设备修理工', '乐观、耐劳、珍惜微小的善意', '共同修复聚落设施的伙伴', '一口干涸多年的水井下藏有旧时代的控制室'],
-    steampunk: ['蒸汽朋克', '浮空城里的见习机械设计师', '热情、专注、对失败格外较真', '共同参与机械展会的搭档', '一份失踪设计师的手稿描绘了尚未建造的城市'],
-    folklore: ['东方志怪', '替乡民抄录旧闻的游方书生', '温和、敏锐、愿意倾听不同立场', '在山间客栈偶遇的旅伴', '每逢雨夜便会多出一页的县志写下陌生人的姓名'],
-    mythology: ['神话史诗', '为古老神殿守护档案的抄写员', '虔诚而独立、谨慎、富有同情心', '因追索同一段神谕相识的同路人', '被视为预言的碑文可能记录着一段遭到掩盖的历史'],
-    infinite: ['无限流副本', '进入陌生试炼空间的普通参与者', '善于观察、保持怀疑、珍惜合作', '在第一场试炼中结成的临时队友', '规则公告与场景中留下的旧笔记出现矛盾'],
-    superpower: ['异能都市', '兼职处理异常事件的社区联络员', '随和、警觉、习惯先保护旁人', '因一次异常事件结识的协助者', '近期的异常事件都发生在同一条已停运的公交线路上'],
-    entertainment: ['娱乐演艺', '刚加入小型剧团的舞台演员', '认真、慢热、遇到表演话题会变得健谈', '共同排练新剧目的合作伙伴', '剧团收到一份署名空白却熟悉每个人过往的剧本'],
-    nautical: ['航海探险', '绘制沿海航图的年轻测绘员', '开朗、细心、对未知海域保持敬畏', '一同搭船出海的探险同伴', '退潮时才会显现的航道通向地图上不存在的岛屿'],
-    beastfolk: ['兽人奇幻', '往返不同族群聚落的旅行信使', '友善、独立、善于察觉情绪变化', '因一封跨越边境的信件结识的同行者', '数个聚落的信件里都提到同一个被遗忘的地名'],
-};
+import { THEMES } from './catalog.js';
+export { THEMES } from './catalog.js';
 export const GENDERS = Object.freeze(['自由设定', '男', '女', '非二元', '无性别', '自定义']);
 export const DETAIL_GROUPS = [
     { id: 'appearance', label: '身体与外貌', fields: [
@@ -168,7 +148,7 @@ export const DETAIL_GROUPS = [
     ] },
 ];
 export const DETAIL_FIELDS = DETAIL_GROUPS.flatMap(group => group.fields);
-export const DEFAULT_FORM = Object.freeze({ theme: 'modern', name: '', age: '25', gender: '自由设定', genderCustom: '', identity: '', traits: '', relation: '', keywords: '', details: Object.freeze({}), language: '简体中文', length: 'standard', mode: 'raw', characterContext: false });
+export const DEFAULT_FORM = Object.freeze({ theme: 'modern', name: '', age: '25', gender: '自由设定', genderCustom: '', themeCustom: '', identity: '', traits: '', relation: '', keywords: '', details: Object.freeze({}), language: '简体中文', length: 'standard', mode: 'raw', characterContext: false });
 export const MAX_DESCRIPTION = 150000;
 const text = (value, max = 4000) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 export const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -280,6 +260,10 @@ export function getGenerationBudget(length) {
     const budgets = { short: 1200, standard: 2800, detailed: 4400, dossier: 6800, ultra: 10000 };
     return Object.hasOwn(budgets, length) ? budgets[length] : budgets.standard;
 }
+export function getTheme(form) {
+    const base = THEMES[form.theme] || THEMES.modern;
+    return form.theme === 'custom' ? [text(form.themeCustom, 100) || base[0], ...base.slice(1)] : base;
+}
 export function getGender(form) {
     const selected = text(form.gender, 100);
     return (selected === '自定义' ? text(form.genderCustom, 100) : selected) || '自由设定';
@@ -290,7 +274,7 @@ export function getDetails(form) {
     return Object.fromEntries(DETAIL_FIELDS.map(([key]) => [key, text(source[key], 1000)]).filter(([, value]) => value));
 }
 export function makeTemplate(form) {
-    const theme = THEMES[form.theme] || THEMES.modern;
+    const theme = getTheme(form);
     const names = ['林澈', '沈予安', '顾行舟', '苏见微', '许星遥', '温知夏'];
     const name = text(form.name, 120) || names[Math.floor(Math.random() * names.length)];
     const identity = text(form.identity) || theme[1], traits = text(form.traits) || theme[2], relation = text(form.relation) || theme[3];
@@ -324,7 +308,7 @@ export function makeTemplate(form) {
     };
 }
 export function buildPrompt(form, current, character = null) {
-    const theme = THEMES[form.theme]?.[0] || '自由题材';
+    const theme = getTheme(form)[0];
     const lengths = { short: '约200至350字', standard: '约500至800字', detailed: '约1000至1400字', dossier: '约1800至2200字', ultra: '约2800至4000字' };
     const details = getDetails(form);
     const request = {

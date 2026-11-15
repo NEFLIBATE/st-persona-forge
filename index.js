@@ -1,3 +1,4 @@
+import { WORLD_GROUPS, CHOICE_GROUPS, getChoiceOptions, toggleTrait } from './catalog.js';
 import { THEMES, GENDERS, DETAIL_GROUPS, DETAIL_FIELDS, getDetails, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, toNativeBackup, parseImport, safeFilename, requestGeneration, parseGenerationResult, getGenerationBudget } from './core.js';
 
 const KEY = 'st_persona_forge_v1';
@@ -7,6 +8,7 @@ let saveTimer;
 let scrollLocks = null;
 let detailUndo = null;
 let detailOpenBeforeFilter = null;
+const choiceLimits = { identity: 36, traits: 36, relation: 36 };
 const $ = id => root.querySelector(`#pf-${id}`);
 const button = (id, label, cls = '') => `<button type="button" id="pf-${id}" class="pf-button ${cls}">${label}</button>`;
 const field = (id, label, placeholder = '', max = 500) => `<label class="pf-field"><span>${label}</span><input id="pf-${id}" maxlength="${max}" placeholder="${placeholder}"></label>`;
@@ -31,6 +33,37 @@ function settings() {
     return stored;
 }
 function syncGenderField() { $('gender-custom-field').hidden = $('gender').value !== '自定义'; }
+function syncThemeField() { $('theme-custom-field').hidden = $('theme').value !== 'custom'; }
+function choicePanel(kind) {
+    const groups = CHOICE_GROUPS[kind], count = groups.reduce((total, group) => total + group.items.length, 0);
+    return `<details class="pf-choice-panel" id="pf-${kind}-picker"><summary>从 ${count} 个${kind === 'identity' ? '身份／职业' : kind === 'traits' ? '性格关键词' : '关系'}中选择 <small>${kind === 'traits' ? '可多选' : '点选填入'}</small></summary>
+      <label class="pf-field"><span>搜索选项</span><input id="pf-${kind}-search" type="search" maxlength="100" placeholder="搜索名称或分类"></label>
+      <label class="pf-field"><span>筛选分类</span><select id="pf-${kind}-category" aria-label="${kind}选项分类">${kind === 'identity' ? '<option value="recommended">当前题材推荐</option>' : ''}<option value="all">全部分类</option>${groups.map(group => `<option value="${group.id}">${group.label}</option>`).join('')}</select></label>
+      <p class="pf-muted">${kind === 'traits' ? '点击可添加或取消，手写关键词会保留。不同倾向可以组合，请检查是否符合人物。' : '点击选项会替换上方这一项；可继续手动补充。浏览或切换分类不会修改已填内容。'}</p>
+      <div class="pf-choice-list" id="pf-${kind}-options" role="group" aria-label="${kind}候选选项"></div><p class="pf-muted" id="pf-${kind}-results" role="status" aria-live="polite"></p>${button(kind + '-more', '显示更多', 'pf-small')}
+    </details>`;
+}
+function syncChoiceSelection(kind) {
+    const selected = kind === 'traits' ? new Set($('traits').value.split(/[、，,；;\n]+/).map(value => value.trim())) : new Set([$(kind).value.trim()]);
+    for (const item of $(kind + '-options').querySelectorAll('button')) item.setAttribute('aria-pressed', String(selected.has(item.dataset.value)));
+}
+function renderChoices(kind) {
+    const options = getChoiceOptions(kind, {theme: state.form.theme, category: $(kind + '-category').value, query: $(kind + '-search').value});
+    const list = $(kind + '-options'); list.replaceChildren();
+    for (const option of options.slice(0, choiceLimits[kind])) {
+        const item = document.createElement('button'); item.type = 'button'; item.className = 'pf-choice'; item.dataset.value = option.value;
+        item.textContent = option.value; item.title = option.group; item.disabled = busy;
+        item.addEventListener('click', () => guard(() => {
+            if (busy) return;
+            const value = kind === 'traits' ? toggleTrait($(kind).value, option.value, $(kind).maxLength) : option.value;
+            $(kind).value = value; state.form[kind] = value; syncChoiceSelection(kind); queueSave();
+        }));
+        list.append(item);
+    }
+    syncChoiceSelection(kind);
+    $(kind + '-results').textContent = options.length ? `显示 ${Math.min(choiceLimits[kind], options.length)}/${options.length} 个选项` : '没有匹配选项，可更换关键词或选择全部分类；也可以直接手写。';
+    $(kind + '-more').hidden = options.length <= choiceLimits[kind];
+}
 function detailPanel() {
     return `<section class="pf-detail-panel" aria-labelledby="pf-detail-heading">
       <div class="pf-detail-heading"><strong id="pf-detail-heading">超细人物档案</strong><small id="pf-detail-count">0/${DETAIL_FIELDS.length}</small>${button('clear-details', '清空细节', 'pf-small')}</div>
@@ -298,8 +331,9 @@ function initialize() {
       <div class="pf-body" id="pf-page-content"><div class="pf-controls" id="pf-create-section">
       <div class="pf-section-heading"><span>01 / 创作方向</span><small>空白项交给 AI</small></div>
       <div class="pf-grid"><label class="pf-field"><span>世界题材</span><select id="pf-theme"></select></label>${field('name', '姓名', '留空则自动取名', 120)}${field('age', '年龄', '例如：25', 80)}<label class="pf-field"><span>性别</span><select id="pf-gender"></select></label></div>
+      <label class="pf-field" id="pf-theme-custom-field" hidden><span>自定义世界题材</span><input id="pf-themeCustom" maxlength="100" placeholder="例如：海底古城与蒸汽机械共存的世界"></label>
       <label class="pf-field" id="pf-gender-custom-field" hidden><span>自定义性别</span><input id="pf-genderCustom" maxlength="100" placeholder="填写性别，或留空由 AI 设定"></label>
-      ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}
+      ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${choicePanel('identity')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${choicePanel('traits')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}${choicePanel('relation')}
       <label class="pf-field"><span>背景、能力与其他要求</span><textarea id="pf-keywords" rows="3" maxlength="4000" placeholder="想保留的经历、弱点、目标、世界规则…"></textarea></label>
       ${detailPanel()}
       <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option><option value="dossier">完整档案</option><option value="ultra">超细档案 · 2800–4000字</option></select></label></div>
@@ -318,16 +352,22 @@ function initialize() {
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details" id="pf-model-output"><summary>上次模型原始输出</summary><p class="pf-muted">遇到格式异常时可查看或下载，用于找回模型已经生成的内容。最多保留100000字符。</p><p class="pf-muted" id="pf-raw-info"></p><textarea id="pf-raw-output" rows="5" readonly aria-label="上次模型原始输出"></textarea><div class="pf-actions">${button('download-output', '下载原始输出')}</div></details>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.4.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.5.0</span></footer>
     </section>`;
-    for (const [key, theme] of Object.entries(THEMES)) $('theme').add(new Option(theme[0], key));
+    for (const group of WORLD_GROUPS) {
+        const element = document.createElement('optgroup'); element.label = group.label;
+        for (const key of group.themes) element.append(new Option(THEMES[key][0], key));
+        $('theme').append(element);
+    }
+    $('theme').add(new Option('自定义世界…', 'custom'));
     for (const gender of GENDERS) $('gender').add(new Option(gender === '自由设定' ? '不指定' : gender, gender));
     for (const key of Object.keys(DEFAULT_FORM)) {
         const el = $(key); if (!el) continue;
         if (el.type === 'checkbox') el.checked = Boolean(state.form[key]); else el.value = state.form[key];
-        el.addEventListener('input', () => { state.form[key] = el.type === 'checkbox' ? el.checked : el.value; if (key === 'gender') syncGenderField(); queueSave(); });
+        el.addEventListener('input', () => { state.form[key] = el.type === 'checkbox' ? el.checked : el.value; if (key === 'gender') syncGenderField(); if (key === 'theme') { syncThemeField(); choiceLimits.identity = 36; renderChoices('identity'); } if (CHOICE_GROUPS[key]) syncChoiceSelection(key); queueSave(); });
     }
-    syncGenderField();
+    syncGenderField(); syncThemeField();
+    for (const kind of Object.keys(CHOICE_GROUPS)) renderChoices(kind);
     for (const [key] of DETAIL_FIELDS) {
         const el = $('detail-' + key);
         el.addEventListener('input', () => { state.form.details[key] = el.value; detailUndo = null; syncDetailCounter(); queueSave(); });
@@ -337,6 +377,12 @@ function initialize() {
     setEditor(state.current); renderDrafts(); renderModelOutput();
     const on = (id, action) => $(id).addEventListener('click', () => guard(action));
     on('close', close);
+    for (const kind of Object.keys(CHOICE_GROUPS)) {
+        const resetChoices = () => { choiceLimits[kind] = 36; renderChoices(kind); };
+        $(kind + '-search').addEventListener('input', resetChoices);
+        $(kind + '-category').addEventListener('change', resetChoices);
+        on(kind + '-more', () => { choiceLimits[kind] += 36; renderChoices(kind); });
+    }
     $('detail-search').addEventListener('input', filterDetails);
     $('detail-filled').addEventListener('change', filterDetails);
     on('expand-details', () => { for (const group of DETAIL_GROUPS) { const element = $('detail-group-' + group.id); if (!element.hidden) element.open = true; } });
