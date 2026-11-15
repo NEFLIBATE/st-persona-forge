@@ -6,6 +6,7 @@ let root, state, busy = false, imageFile = null, imageURL = '', previousFocus, p
 let saveTimer;
 let scrollLocks = null;
 let detailUndo = null;
+let detailOpenBeforeFilter = null;
 const $ = id => root.querySelector(`#pf-${id}`);
 const button = (id, label, cls = '') => `<button type="button" id="pf-${id}" class="pf-button ${cls}">${label}</button>`;
 const field = (id, label, placeholder = '', max = 500) => `<label class="pf-field"><span>${label}</span><input id="pf-${id}" maxlength="${max}" placeholder="${placeholder}"></label>`;
@@ -31,13 +32,45 @@ function settings() {
 }
 function syncGenderField() { $('gender-custom-field').hidden = $('gender').value !== '自定义'; }
 function detailPanel() {
-    return `<section class="pf-detail-panel" aria-labelledby="pf-detail-heading"><div class="pf-detail-heading"><strong id="pf-detail-heading">人物细节</strong><small id="pf-detail-count">0/${DETAIL_FIELDS.length}</small>${button('clear-details', '清空细节', 'pf-small')}</div><p class="pf-muted">按需展开填写。已填写的事实会优先保留；留空部分交给 AI 创作。</p>${DETAIL_GROUPS.map(group => `<details class="pf-details" id="pf-detail-group-${group.id}"><summary>${group.label} <small id="pf-detail-count-${group.id}"></small></summary>${group.fields.map(([key, label, placeholder]) => `<label class="pf-field"><span>${label}</span><textarea id="pf-detail-${key}" rows="2" maxlength="1000" placeholder="${placeholder}"></textarea></label>`).join('')}</details>`).join('')}</section>`;
+    return `<section class="pf-detail-panel" aria-labelledby="pf-detail-heading">
+      <div class="pf-detail-heading"><strong id="pf-detail-heading">超细人物档案</strong><small id="pf-detail-count">0/${DETAIL_FIELDS.length}</small>${button('clear-details', '清空细节', 'pf-small')}</div>
+      <p class="pf-muted">12 类、120 项均为选填，不必全部填写。先确定核心，再补充让人物鲜活的细节；示例不会自动写入设定。</p>
+      <label class="pf-field"><span>搜索细节</span><input id="pf-detail-search" type="search" maxlength="100" placeholder="搜索字段或已填内容，例如：声音、恐惧、旧友"></label>
+      <div class="pf-detail-tools"><label class="pf-check"><input id="pf-detail-filled" type="checkbox">只看已填写</label>${button('expand-details', '展开全部', 'pf-small')}${button('collapse-details', '收起全部', 'pf-small')}</div>
+      <label class="pf-field"><span>快速定位分组</span><select id="pf-detail-jump" aria-label="快速定位细节分组"><option value="">选择分组…</option>${DETAIL_GROUPS.map((group, index) => `<option value="${group.id}">${String(index + 1).padStart(2, '0')} ${group.label}</option>`).join('')}</select></label>
+      <p class="pf-muted" id="pf-detail-results" role="status" aria-live="polite"></p>
+      ${DETAIL_GROUPS.map((group, index) => `<details class="pf-details" id="pf-detail-group-${group.id}"><summary><span>${String(index + 1).padStart(2, '0')} ${group.label}</span> <small id="pf-detail-count-${group.id}"></small></summary>${group.fields.map(([key, label, placeholder]) => `<label class="pf-field" id="pf-detail-field-${key}"><span>${label}</span><textarea id="pf-detail-${key}" rows="2" maxlength="1000" placeholder="${placeholder}"></textarea></label>`).join('')}</details>`).join('')}</section>`;
+}
+function filterDetails() {
+    const query = $('detail-search').value.trim().toLocaleLowerCase();
+    const tokens = query.split(/\s+/).filter(Boolean), filledOnly = $('detail-filled').checked;
+    const filtering = tokens.length > 0 || filledOnly;
+    if (filtering && !detailOpenBeforeFilter) detailOpenBeforeFilter = new Map(DETAIL_GROUPS.map(group => [group.id, $('detail-group-' + group.id).open]));
+    let total = 0;
+    for (const group of DETAIL_GROUPS) {
+        let visible = 0;
+        for (const [key, label, placeholder] of group.fields) {
+            const value = state.form.details[key] || '';
+            const haystack = `${group.label} ${label} ${placeholder} ${value}`.toLocaleLowerCase();
+            const matches = (!filledOnly || value.trim()) && tokens.every(token => haystack.includes(token));
+            $('detail-field-' + key).hidden = !matches;
+            if (matches) visible++;
+        }
+        const element = $('detail-group-' + group.id);
+        element.hidden = visible === 0;
+        if (filtering && visible) element.open = true;
+        else if (!filtering && detailOpenBeforeFilter) element.open = detailOpenBeforeFilter.get(group.id);
+        total += visible;
+    }
+    if (!filtering) detailOpenBeforeFilter = null;
+    $('detail-results').textContent = filtering ? (total ? `显示 ${total}/${DETAIL_FIELDS.length} 项，筛选不会删除或排除生成时使用的内容。` : '没有匹配项。可更换关键词或取消“只看已填写”。') : '按需展开分组；每项最多1000字符，所有已填细节都会用于生成。';
 }
 function syncDetailCounter() {
     const values = getDetails(state.form);
     $('detail-count').textContent = `${Object.keys(values).length}/${DETAIL_FIELDS.length} 已填写`;
     for (const group of DETAIL_GROUPS) $('detail-count-' + group.id).textContent = `${group.fields.filter(([key]) => values[key]).length}/${group.fields.length}`;
     $('clear-details').textContent = detailUndo ? '撤销清空' : '清空细节';
+    filterDetails();
 }
 function restoreDetailInputs() {
     for (const [key] of DETAIL_FIELDS) $('detail-' + key).value = state.form.details[key] || '';
@@ -269,7 +302,7 @@ function initialize() {
       ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}
       <label class="pf-field"><span>背景、能力与其他要求</span><textarea id="pf-keywords" rows="3" maxlength="4000" placeholder="想保留的经历、弱点、目标、世界规则…"></textarea></label>
       ${detailPanel()}
-      <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option><option value="dossier">完整档案</option></select></label></div>
+      <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option><option value="dossier">完整档案</option><option value="ultra">超细档案 · 2800–4000字</option></select></label></div>
       <details class="pf-details"><summary>生成参考与连接</summary><label class="pf-field"><span>生成模式</span><select id="pf-mode"><option value="raw">独立创作（不读取聊天）</option><option value="chat">沿用当前聊天上下文与预设</option></select></label><label class="pf-check"><input id="pf-characterContext" type="checkbox">参考当前单人聊天的角色卡</label><p class="pf-muted">AI 使用酒馆当前连接和模型参数。上下文模式会把当前聊天、用户设定等参考内容发送给该模型；独立模式不会主动读取聊天。</p></details>
       <div class="pf-actions">${button('generate', '✦ AI 生成／完善', 'pf-primary')}${button('template', '免 API 中文模板')}</div>
       <p class="pf-muted">AI 生成会参考编辑器已有内容。想从头创作时，先点“新建设定”。</p>
@@ -285,7 +318,7 @@ function initialize() {
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details" id="pf-model-output"><summary>上次模型原始输出</summary><p class="pf-muted">遇到格式异常时可查看或下载，用于找回模型已经生成的内容。最多保留100000字符。</p><p class="pf-muted" id="pf-raw-info"></p><textarea id="pf-raw-output" rows="5" readonly aria-label="上次模型原始输出"></textarea><div class="pf-actions">${button('download-output', '下载原始输出')}</div></details>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.3.1</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.4.0</span></footer>
     </section>`;
     for (const [key, theme] of Object.entries(THEMES)) $('theme').add(new Option(theme[0], key));
     for (const gender of GENDERS) $('gender').add(new Option(gender === '自由设定' ? '不指定' : gender, gender));
@@ -304,6 +337,18 @@ function initialize() {
     setEditor(state.current); renderDrafts(); renderModelOutput();
     const on = (id, action) => $(id).addEventListener('click', () => guard(action));
     on('close', close);
+    $('detail-search').addEventListener('input', filterDetails);
+    $('detail-filled').addEventListener('change', filterDetails);
+    on('expand-details', () => { for (const group of DETAIL_GROUPS) { const element = $('detail-group-' + group.id); if (!element.hidden) element.open = true; } });
+    on('collapse-details', () => { for (const group of DETAIL_GROUPS) $('detail-group-' + group.id).open = false; });
+    $('detail-jump').addEventListener('change', () => {
+        const id = $('detail-jump').value; if (!id) return;
+        $('detail-search').value = ''; $('detail-filled').checked = false; filterDetails();
+        const target = $('detail-group-' + id); target.open = true;
+        const scroller = $('page-content');
+        scroller.scrollTo({ top: target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop, behavior: 'instant' });
+        target.querySelector('summary').focus(); $('detail-jump').value = '';
+    });
     on('clear-details', () => {
         if (detailUndo) { state.form.details = { ...detailUndo }; detailUndo = null; status('已恢复清空前的人物细节。'); }
         else {

@@ -46,3 +46,12 @@
 #pf-overlay .pf-detail-panel summary{font-size:13px;color:var(--pf-text)}#pf-overlay .pf-detail-panel summary small{float:right;color:var(--pf-muted);font-size:11px;margin-top:3px}
 #pf-overlay .pf-detail-panel textarea{min-height:76px}#pf-overlay .pf-detail-panel .pf-field:last-child{margin-bottom:8px}
 @media(max-width:760px){#pf-overlay .pf-detail-panel{padding:12px}#pf-overlay .pf-detail-panel textarea{font-size:16px;min-height:84px}}
+
+#pf-overlay .pf-detail-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+#pf-overlay .pf-detail-tools .pf-check{margin:0 auto 0 0;align-items:center}
+#pf-overlay .pf-detail-panel summary{display:flex;align-items:baseline;gap:8px;list-style:none}
+#pf-overlay .pf-detail-panel summary::before{content:'▸';color:var(--pf-accent);flex-shrink:0}
+#pf-overlay .pf-detail-panel details[open]>summary::before{content:'▾'}
+#pf-overlay .pf-detail-panel summary span{flex:1;min-width:0;overflow-wrap:anywhere}
+#pf-overlay .pf-detail-panel summary small{float:none;flex-shrink:0;margin:0}
+#pf-overlay #pf-detail-results{min-height:21px}
