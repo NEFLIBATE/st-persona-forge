@@ -230,9 +230,9 @@ async function generate() {
 async function placeholderAvatar(name) {
     const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 600;
     const ctx = canvas.getContext('2d');
-    const gradient = ctx.createLinearGradient(0, 0, 400, 600); gradient.addColorStop(0, '#353058'); gradient.addColorStop(1, '#151728');
+    const gradient = ctx.createLinearGradient(0, 0, 400, 600); gradient.addColorStop(0, '#315b3d'); gradient.addColorStop(1, '#0c2116');
     ctx.fillStyle = gradient; ctx.fillRect(0, 0, 400, 600);
-    ctx.fillStyle = '#e6cc9b'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '140px sans-serif';
+    ctx.fillStyle = '#c5ebc9'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '140px sans-serif';
     ctx.fillText(Array.from(name)[0] || 'P', 200, 275);
     ctx.font = '20px sans-serif'; ctx.fillText('PERSONA FORGE', 200, 480);
     return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('无法创建头像，请选择本地图片。')), 'image/png'));
@@ -315,9 +315,9 @@ function initialize() {
     state = settings();
     const pageHost = document.createElement('div'); pageHost.id = 'pf-host';
     const shadow = pageHost.attachShadow({ mode: 'open' });
-    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.3.1', import.meta.url).href;
+    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.6.0', import.meta.url).href;
     const critical = document.createElement('style');
-    critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#151722;color:#efedf5}dialog#pf-overlay[hidden]{display:none!important}';
+    critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#0b1914;color:#ecf5ef}dialog#pf-overlay[hidden]{display:none!important}';
     shadow.append(critical, sheet);
     root = document.createElement('dialog'); root.id = 'pf-overlay'; root.className = 'pf-hidden'; root.hidden = true;
     root.setAttribute('aria-labelledby', 'pf-heading');
@@ -326,7 +326,7 @@ function initialize() {
     window.addEventListener('resize', syncViewport);
     root.addEventListener('cancel', event => { event.preventDefault(); close(); });
     root.innerHTML = `<section class="pf-window">
-      <header class="pf-header"><div><div class="pf-eyebrow">PERSONA FORGE / 用户设定工坊</div><h2 id="pf-heading">用户设定工坊</h2><p>创建自己的故事身份 <span id="pf-connection" class="pf-connection"></span></p></div>${button('close', '返回酒馆 ×', 'pf-close')}</header>
+      <header class="pf-header"><div class="pf-brand"><span class="pf-brand-mark" aria-hidden="true"><svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 37V19M18 29C7 30 5 23 5 18c8 0 13 4 13 11ZM18 23c11 0 14-8 13-15-9 0-13 6-13 15Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="m18 29-7-6m7 0 8-10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span><div class="pf-brand-copy"><div class="pf-eyebrow">PERSONA FORGE / 用户设定工坊</div><h2 id="pf-heading">用户设定工坊</h2><p>创建自己的故事身份 <span id="pf-connection" class="pf-connection"></span></p></div></div>${button('close', '返回酒馆 ×', 'pf-close')}</header>
       <nav class="pf-nav" aria-label="页面导航">${button('nav-create', '01 创作设定')}${button('nav-editor', '02 编辑与导出')}${button('nav-drafts', '草稿架')}</nav>
       <div class="pf-body" id="pf-page-content"><div class="pf-controls" id="pf-create-section">
       <div class="pf-section-heading"><span>01 / 创作方向</span><small>空白项交给 AI</small></div>
@@ -352,7 +352,7 @@ function initialize() {
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details" id="pf-model-output"><summary>上次模型原始输出</summary><p class="pf-muted">遇到格式异常时可查看或下载，用于找回模型已经生成的内容。最多保留100000字符。</p><p class="pf-muted" id="pf-raw-info"></p><textarea id="pf-raw-output" rows="5" readonly aria-label="上次模型原始输出"></textarea><div class="pf-actions">${button('download-output', '下载原始输出')}</div></details>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.5.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.6.0</span></footer>
     </section>`;
     for (const group of WORLD_GROUPS) {
         const element = document.createElement('optgroup'); element.label = group.label;
