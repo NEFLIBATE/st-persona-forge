@@ -152,7 +152,7 @@ try {
  await page.screenshot({path:path.join(artifacts, 'fullpage-desktop.png')});
  // Full-page layout is isolated from hostile themes and transformed page ancestors.
  assert.deepEqual(await page.locator('#pf-overlay').evaluate(el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,modal:el.matches(':modal')};}),{x:0,y:0,width:1360,height:1000,modal:true});
- assert.equal(await page.locator('#pf-name').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(16, 19, 29)');
+ assert.equal(await page.locator('#pf-name').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(11, 28, 21)');
  assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden');
  // Native export round trip, preserving macros and no active-persona override.
  const downloaded=page.waitForEvent('download');await page.locator('#pf-export').click();const d=await downloaded;
@@ -249,5 +249,23 @@ try {
  assert.equal(await page.locator('#pf-page-content').evaluate(el=>el.scrollTop),0);
  await page.keyboard.press('Escape');assert.equal(await page.locator('#pf-overlay').isVisible(),false);
  assert.deepEqual(errors,[]);
+ // Capture documentation previews with fictional sample data after the regressions.
+ const preview=await browser.newPage({viewport:{width:1360,height:1000}});
+ await preview.goto(`http://127.0.0.1:${server.address().port}`);
+ await preview.getByText('打开用户设定生成器',{exact:true}).click();
+ await preview.locator('#pf-gender').selectOption('女');
+ await preview.locator('#pf-name').fill('林见青');
+ await preview.locator('#pf-identity').fill('经营旧书店的古籍修复师');
+ await preview.locator('#pf-traits').fill('温和、慢热、善于观察、嘴硬心软');
+ await preview.locator('#pf-relation').fill('因旧书里的一封留言相识');
+ await preview.locator('#pf-keywords').fill('喜欢雨天和植物。正在寻找一本失踪多年的手写日记；遇到未知情况先观察，不擅长正面冲突。');
+ await preview.locator('#pf-clear-details').click();
+ await preview.locator('#pf-template').click();
+ await preview.locator('#pf-nav-create').click();
+ await preview.screenshot({path:path.join(artifacts,'forest-desktop.png')});
+ await preview.setViewportSize({width:393,height:800});
+ await preview.locator('#pf-nav-create').click();
+ await preview.screenshot({path:path.join(artifacts,'forest-mobile.png')});
+ await preview.close();
  console.log(JSON.stringify({passed:true,artifacts,checks:['marker text generation','truncated JSON recovery and warning','malformed JSON recovery','invalid response preserves editor','raw response persistence and download','one model call per click','120 optional detail inputs','facts in template and AI request','detail clear and undo','detail persistence','full dossier length','desktop mount','64 selectable world templates plus custom','192 professions','120 multi-select traits','120 relationship options','search, categories and more choices','theme recommendations preserve user input','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
 } catch(e){console.log(await page.locator('#pf-status').textContent());console.log(await page.evaluate(()=>fixture.requests));console.log(errors);await page.screenshot({path:path.join(artifacts, 'fullpage-failure.png')});throw e;} finally {await browser.close();server.close();}
