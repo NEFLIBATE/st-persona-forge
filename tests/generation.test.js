@@ -64,7 +64,7 @@ test('empty and non-text bodies are rejected while plain prose and missing names
 });
 
 test('each length has a positive budget and larger dossiers receive more output room', () => {
-    const budgets = ['short', 'standard', 'detailed', 'dossier'].map(getGenerationBudget);
+    const budgets = ['short', 'standard', 'detailed', 'dossier', 'ultra'].map(getGenerationBudget);
     assert.ok(budgets.every(value => Number.isInteger(value) && value > 0));
     assert.ok(budgets.every((value, index) => index === 0 || value > budgets[index - 1]));
     assert.equal(getGenerationBudget('unknown'), getGenerationBudget('standard'));

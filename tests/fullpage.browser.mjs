@@ -13,7 +13,7 @@ const artifacts=await fs.mkdtemp(path.join(tmpdir(), 'persona-forge-ui-'));
 const mock = `
 window.fixture={failAI:false,failUpload:false,override:null,selected:'original',saves:0,requests:[]};
 const power={personas:{original:'原有用户'},persona_descriptions:{original:{description:'原有设定内容',title:'原设定'}},default_persona:'original'};
-const c={powerUserSettings:power,extensionSettings:{st_persona_forge_v1:{form:{gender:'旧版自填性别'}}},onlineStatus:'connected',characters:[{name:'对手角色',description:'CHARACTER SECRET',scenario:'world'}],characterId:0,getRequestHeaders:()=>({'Content-Type':'application/json','X-CSRF-Token':'test'}),saveSettingsDebounced:()=>fixture.saves++,eventTypes:{APP_READY:'ready'},eventSource:{on:(_e,fn)=>queueMicrotask(fn)},SlashCommand:{fromProps:x=>x},SlashCommandParser:{addCommandObject:x=>window.command=x},generateRaw:async(options={})=>{fixture.requests.push(options);if(fixture.failAI)throw new Error('模拟模型连接失败');if(fixture.override!==null)return fixture.override;return ['[PERSONA_NAME]','AI 林澈','[PERSONA_TITLE]','生成结果','[PERSONA_DESCRIPTION]','由AI生成的完整用户设定 {{user}} 与 {{char}}。'].join('\\n');},generateQuietPrompt:async(options={})=>{fixture.requests.push(options);return JSON.stringify({name:'上下文用户',description:'chat result'});}};
+const c={powerUserSettings:power,extensionSettings:{st_persona_forge_v1:{form:{gender:'旧版自填性别',details:{features:'旧版灰瞳',hooks:'旧版迟来的信'}}}},onlineStatus:'connected',characters:[{name:'对手角色',description:'CHARACTER SECRET',scenario:'world'}],characterId:0,getRequestHeaders:()=>({'Content-Type':'application/json','X-CSRF-Token':'test'}),saveSettingsDebounced:()=>fixture.saves++,eventTypes:{APP_READY:'ready'},eventSource:{on:(_e,fn)=>queueMicrotask(fn)},SlashCommand:{fromProps:x=>x},SlashCommandParser:{addCommandObject:x=>window.command=x},generateRaw:async(options={})=>{fixture.requests.push(options);if(fixture.failAI)throw new Error('模拟模型连接失败');if(fixture.override!==null)return fixture.override;return ['[PERSONA_NAME]','AI 林澈','[PERSONA_TITLE]','生成结果','[PERSONA_DESCRIPTION]','由AI生成的完整用户设定 {{user}} 与 {{char}}。'].join('\\n');},generateQuietPrompt:async(options={})=>{fixture.requests.push(options);return JSON.stringify({name:'上下文用户',description:'chat result'});}};
 window.SillyTavern={getContext:()=>c};window.fixture.power=power;
 `;
 const pm = `export async function initPersona(id,name,description,title){fixture.power.personas[id]=name;fixture.power.persona_descriptions[id]={description,title};} export async function getUserAvatars(){return Object.keys(fixture.power.personas);}export async function setUserAvatar(id){fixture.selected=id;}`;
@@ -56,19 +56,43 @@ try {
  await page.locator('#pf-genderCustom').fill('流体性别');await page.locator('#pf-template').click();
  assert.ok((await page.locator('#pf-description').inputValue()).includes('性别：流体性别'));
  await page.locator('#pf-gender').selectOption('女');await page.locator('#pf-theme').selectOption('modern');
+ // Old detail facts migrate intact. Filters are views, never generation exclusions.
+ assert.equal(await page.locator('#pf-detail-features').inputValue(),'旧版灰瞳');
+ assert.equal(await page.locator('#pf-detail-count').textContent(),`2/${DETAIL_FIELDS.length} 已填写`);
+ await page.locator('#pf-detail-filled').check();
+ assert.equal(await page.locator('.pf-detail-panel textarea:visible').count(),2);
+ await page.locator('#pf-detail-search').fill('灰瞳');
+ assert.equal(await page.locator('.pf-detail-panel textarea:visible').count(),1);
+ await page.locator('#pf-detail-search').fill('no-such-field');
+ assert.equal(await page.locator('.pf-detail-panel textarea:visible').count(),0);
+ assert.match(await page.locator('#pf-detail-results').textContent(),/没有匹配/);
+ await page.locator('#pf-detail-search').fill('');await page.locator('#pf-detail-filled').uncheck();
+ assert.equal(await page.locator('.pf-detail-panel details[open]').count(),0);
+ await page.locator('#pf-expand-details').click();
+ assert.equal(await page.locator('.pf-detail-panel textarea:visible').count(),DETAIL_FIELDS.length);
+ await page.locator('#pf-collapse-details').click();
+ assert.equal(await page.locator('.pf-detail-panel details[open]').count(),0);
+ await page.locator('#pf-detail-search').fill('能力');
+ await page.locator('#pf-detail-jump').selectOption('daily');
+ assert.equal(await page.locator('#pf-detail-search').inputValue(),'');
+ assert.equal(await page.locator('#pf-detail-group-daily').evaluate(el=>el.open),true);
+ assert.equal(await page.locator('#pf-detail-group-daily > summary').evaluate(el=>el.getRootNode().activeElement===el),true);
+ await page.locator('#pf-collapse-details').click();
  // Each optional fact has a real input and participates in both output routes.
  for(const group of DETAIL_GROUPS){
   await page.locator('#pf-detail-group-'+group.id+' > summary').click();
   for(const [key] of group.fields) await page.locator('#pf-detail-'+key).fill('DETAIL_VALUE_'+key);
   await page.locator('#pf-detail-group-'+group.id+' > summary').click();
  }
- assert.equal(await page.locator('#pf-detail-count').textContent(),'25/25 已填写');
- await page.locator('#pf-clear-details').click();assert.equal(await page.locator('#pf-detail-count').textContent(),'0/25 已填写');
+ assert.equal(await page.locator('#pf-detail-count').textContent(),`${DETAIL_FIELDS.length}/${DETAIL_FIELDS.length} 已填写`);
+ await page.locator('#pf-clear-details').click();assert.equal(await page.locator('#pf-detail-count').textContent(),`0/${DETAIL_FIELDS.length} 已填写`);
  assert.equal(await page.locator('#pf-detail-features').inputValue(),'');
  await page.locator('#pf-clear-details').click();assert.equal(await page.locator('#pf-detail-features').inputValue(),'DETAIL_VALUE_features');
- assert.equal(await page.locator('#pf-detail-count').textContent(),'25/25 已填写');
- await page.locator('#pf-length').selectOption('dossier');
+ assert.equal(await page.locator('#pf-detail-count').textContent(),`${DETAIL_FIELDS.length}/${DETAIL_FIELDS.length} 已填写`);
+ await page.locator('#pf-length').selectOption('ultra');
+ await page.locator('#pf-detail-search').fill('声音');
  await page.locator('#pf-template').click();
+ await page.locator('#pf-detail-search').fill('');
  for(const [key] of DETAIL_FIELDS) assert.ok((await page.locator('#pf-description').inputValue()).includes('DETAIL_VALUE_'+key));
  assert.ok((await page.locator('#pf-description').inputValue()).length>200);
  await page.locator('#pf-out-name').fill('林澈');
@@ -94,7 +118,7 @@ try {
  assert.equal(await page.locator('#pf-description').inputValue(),prior);
  await page.evaluate(()=>fixture.failAI=false);await page.locator('#pf-generate').click();await page.locator('#pf-status').filter({hasText:'生成完成'}).waitFor();
  assert.equal(await page.locator('#pf-out-name').inputValue(),'AI 林澈');
- const request=await page.evaluate(()=>fixture.requests.at(-1));assert.equal(request.responseLength,getGenerationBudget('dossier'));for(const [key] of DETAIL_FIELDS)assert.ok(request.prompt.includes('DETAIL_VALUE_'+key));assert.ok(!request.prompt.includes('CHARACTER SECRET'));assert.ok(request.prompt.includes('\"性别\": \"女\"'));assert.ok(!request.prompt.includes('称谓'));
+ const request=await page.evaluate(()=>fixture.requests.at(-1));assert.equal(request.responseLength,getGenerationBudget('ultra'));for(const [key] of DETAIL_FIELDS)assert.ok(request.prompt.includes('DETAIL_VALUE_'+key));assert.ok(!request.prompt.includes('CHARACTER SECRET'));assert.ok(request.prompt.includes('\"性别\": \"女\"'));assert.ok(!request.prompt.includes('称谓'));
  // Reproduce the incomplete-JSON screenshot without making an automatic retry.
  const cutResponse='{"name":"恢复草稿","title":"测试","description":"已经生成的正文\\n末尾尚未';
  let calls=await page.evaluate(()=>fixture.requests.length);
@@ -127,7 +151,7 @@ try {
  assert.match(await page.locator('#pf-description').inputValue(),/window.hacked/);
  assert.equal(await page.locator('#pf-raw-output').inputValue(),diagnosticResponse);
  assert.equal(await page.locator('#pf-detail-features').inputValue(),'DETAIL_VALUE_features');
- assert.equal(await page.locator('#pf-detail-count').textContent(),'25/25 已填写');
+ assert.equal(await page.locator('#pf-detail-count').textContent(),`${DETAIL_FIELDS.length}/${DETAIL_FIELDS.length} 已填写`);
  // Read native personas into a draft, create a separate persona and explicitly select it.
  await page.locator('summary').filter({hasText:'从酒馆读取已有用户设定'}).click();
  await page.locator('#pf-existing').selectOption('original');await page.locator('#pf-load-existing').click();
@@ -166,5 +190,5 @@ try {
  assert.equal(await page.locator('#pf-page-content').evaluate(el=>el.scrollTop),0);
  await page.keyboard.press('Escape');assert.equal(await page.locator('#pf-overlay').isVisible(),false);
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({passed:true,artifacts,checks:['marker text generation','truncated JSON recovery and warning','malformed JSON recovery','invalid response preserves editor','raw response persistence and download','one model call per click','25 optional detail inputs','facts in template and AI request','detail clear and undo','detail persistence','full dossier length','desktop mount','20 selectable world templates','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
+ console.log(JSON.stringify({passed:true,artifacts,checks:['marker text generation','truncated JSON recovery and warning','malformed JSON recovery','invalid response preserves editor','raw response persistence and download','one model call per click','120 optional detail inputs','facts in template and AI request','detail clear and undo','detail persistence','full dossier length','desktop mount','20 selectable world templates','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
 } catch(e){console.log(await page.locator('#pf-status').textContent());console.log(await page.evaluate(()=>fixture.requests));console.log(errors);await page.screenshot({path:path.join(artifacts, 'fullpage-failure.png')});throw e;} finally {await browser.close();server.close();}
