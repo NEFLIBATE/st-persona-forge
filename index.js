@@ -1,3 +1,4 @@
+import { mountReferences, normalizeReferences, referencesPanel } from './references.js';
 import { WORLD_GROUPS, CHOICE_GROUPS, getChoiceOptions, toggleTrait } from './catalog.js';
 import { THEMES, GENDERS, DETAIL_GROUPS, DETAIL_FIELDS, getDetails, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, toNativeBackup, parseImport, safeFilename, requestGeneration, parseGenerationResult, getGenerationBudget } from './core.js';
 
@@ -7,6 +8,7 @@ let root, state, busy = false, imageFile = null, imageURL = '', previousFocus, p
 let saveTimer;
 let scrollLocks = null;
 let detailUndo = null;
+let references;
 let detailOpenBeforeFilter = null;
 const choiceLimits = { identity: 36, traits: 36, relation: 36 };
 const $ = id => root.querySelector(`#pf-${id}`);
@@ -24,6 +26,7 @@ function settings() {
         stored.form.gender = stored.form.genderCustom ? '自定义' : '自由设定';
     }
     stored.form.details = getDetails(stored.form);
+    stored.references = normalizeReferences(stored.references);
     stored.current = { ...defaults.current, ...stored.current };
     stored.lastOutput = typeof stored.lastOutput === 'string' ? stored.lastOutput.slice(0, 100000) : '';
     stored.lastOutputAt = typeof stored.lastOutputAt === 'string' ? stored.lastOutputAt : '';
@@ -205,17 +208,13 @@ async function generate() {
     if (typeof fn !== 'function') throw new Error('当前酒馆版本缺少生成接口，请升级或使用本地模板。');
     if (c.onlineStatus === 'no_connection') throw new Error('请先在酒馆连接可用的模型 API，或使用免 API 模板。');
     const form = { ...state.form }, current = readEditor();
-    let character = null;
-    if (form.characterContext) {
-        const ch = c.characters?.[c.characterId];
-        if (!ch) throw new Error('请先打开一个单人角色聊天，或取消勾选角色参考。');
-        character = { name: ch.name, description: ch.data?.description || ch.description, scenario: ch.data?.scenario || ch.scenario };
-    }
-    const prompt = buildPrompt(form, current.name && current.description ? current : null, character);
     const length = getGenerationBudget(form.length);
-    setBusy(true); status('正在使用酒馆当前连接生成，请稍候。可关闭窗口，结果会保留。');
+    setBusy(true); status('正在读取已选创作参考…');
     let received = false;
     try {
+        const refs = await references.collect();
+        const prompt = buildPrompt(form, current.name && current.description ? current : null, refs.character, refs);
+        status('正在使用酒馆当前连接生成，请稍候。可关闭窗口，结果会保留。');
         const result = await requestGeneration(c, form.mode, prompt, length);
         rememberModelOutput(result); received = true;
         const parsed = parseGenerationResult(result, form.name || current.name);
@@ -315,7 +314,7 @@ function initialize() {
     state = settings();
     const pageHost = document.createElement('div'); pageHost.id = 'pf-host';
     const shadow = pageHost.attachShadow({ mode: 'open' });
-    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.6.0', import.meta.url).href;
+    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.7.0', import.meta.url).href;
     const critical = document.createElement('style');
     critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#0b1914;color:#ecf5ef}dialog#pf-overlay[hidden]{display:none!important}';
     shadow.append(critical, sheet);
@@ -334,10 +333,11 @@ function initialize() {
       <label class="pf-field" id="pf-theme-custom-field" hidden><span>自定义世界题材</span><input id="pf-themeCustom" maxlength="100" placeholder="例如：海底古城与蒸汽机械共存的世界"></label>
       <label class="pf-field" id="pf-gender-custom-field" hidden><span>自定义性别</span><input id="pf-genderCustom" maxlength="100" placeholder="填写性别，或留空由 AI 设定"></label>
       ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${choicePanel('identity')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${choicePanel('traits')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}${choicePanel('relation')}
+      ${referencesPanel()}
       <label class="pf-field"><span>背景、能力与其他要求</span><textarea id="pf-keywords" rows="3" maxlength="4000" placeholder="想保留的经历、弱点、目标、世界规则…"></textarea></label>
       ${detailPanel()}
       <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option><option value="dossier">完整档案</option><option value="ultra">超细档案 · 2800–4000字</option></select></label></div>
-      <details class="pf-details"><summary>生成参考与连接</summary><label class="pf-field"><span>生成模式</span><select id="pf-mode"><option value="raw">独立创作（不读取聊天）</option><option value="chat">沿用当前聊天上下文与预设</option></select></label><label class="pf-check"><input id="pf-characterContext" type="checkbox">参考当前单人聊天的角色卡</label><p class="pf-muted">AI 使用酒馆当前连接和模型参数。上下文模式会把当前聊天、用户设定等参考内容发送给该模型；独立模式不会主动读取聊天。</p></details>
+      <details class="pf-details"><summary>生成参考与连接</summary><label class="pf-field"><span>生成模式</span><select id="pf-mode"><option value="raw">独立创作（不读取聊天）</option><option value="chat">沿用当前聊天上下文与预设</option></select></label><p class="pf-muted">AI 使用酒馆当前连接和模型参数。上下文模式会把当前聊天、用户设定等参考内容发送给该模型；独立模式不会主动读取聊天。</p></details>
       <div class="pf-actions">${button('generate', '✦ AI 生成／完善', 'pf-primary')}${button('template', '免 API 中文模板')}</div>
       <p class="pf-muted">AI 生成会参考编辑器已有内容。想从头创作时，先点“新建设定”。</p>
       <details class="pf-details"><summary>从酒馆读取已有用户设定</summary><select id="pf-existing" aria-label="已有用户设定"></select><div class="pf-actions">${button('load-existing', '读取到编辑器')}${button('refresh', '刷新列表')}</div><p class="pf-muted">读取后可完善并保存为新设定。</p></details>
@@ -352,7 +352,7 @@ function initialize() {
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details" id="pf-model-output"><summary>上次模型原始输出</summary><p class="pf-muted">遇到格式异常时可查看或下载，用于找回模型已经生成的内容。最多保留100000字符。</p><p class="pf-muted" id="pf-raw-info"></p><textarea id="pf-raw-output" rows="5" readonly aria-label="上次模型原始输出"></textarea><div class="pf-actions">${button('download-output', '下载原始输出')}</div></details>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.6.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.7.0</span></footer>
     </section>`;
     for (const group of WORLD_GROUPS) {
         const element = document.createElement('optgroup'); element.label = group.label;
@@ -366,6 +366,7 @@ function initialize() {
         if (el.type === 'checkbox') el.checked = Boolean(state.form[key]); else el.value = state.form[key];
         el.addEventListener('input', () => { state.form[key] = el.type === 'checkbox' ? el.checked : el.value; if (key === 'gender') syncGenderField(); if (key === 'theme') { syncThemeField(); choiceLimits.identity = 36; renderChoices('identity'); } if (CHOICE_GROUPS[key]) syncChoiceSelection(key); queueSave(); });
     }
+    references = mountReferences({ get: $, context, state, save: queueSave, guard, isBusy: () => busy });
     syncGenderField(); syncThemeField();
     for (const kind of Object.keys(CHOICE_GROUPS)) renderChoices(kind);
     for (const [key] of DETAIL_FIELDS) {
@@ -405,7 +406,15 @@ function initialize() {
     });
     for (const part of ['create', 'editor', 'drafts']) on(`nav-${part}`, () => goToPart(part));
     on('generate', generate); on('install', installPersona);
-    on('template', () => { replaceEditor(makeTemplate(state.form)); revealEditor(); status('已载入中文模板，可编辑后保存，或让 AI 进一步完善。'); });
+    on('template', async () => {
+        if (busy) return;
+        setBusy(true);
+        try {
+            replaceEditor(makeTemplate(state.form, await references.getLocal()));
+            revealEditor();
+            status('已载入中文模板，可编辑后保存，或让 AI 进一步完善。');
+        } finally { setBusy(false); }
+    });
     on('new', () => { snapshot(readEditor()); setEditor({}); $('name').value = ''; state.form.name = ''; clearAvatar(); persist(); goToPart('create'); status('已新建，上一份有效内容已存入草稿。'); });
     on('save', () => { snapshot(normalizePersona(readEditor())); status('已保存草稿。'); });
     on('refresh', refreshPersonas);

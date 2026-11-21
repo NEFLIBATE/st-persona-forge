@@ -134,3 +134,32 @@
 #pf-overlay input[type=file]::file-selector-button{font:inherit;color:#d9eedb;background:#294b34;border:1px solid #55775d;border-radius:7px;padding:6px 8px;margin-right:10px;cursor:pointer}
 @media(max-width:760px){#pf-overlay .pf-header{padding-top:max(16px,env(safe-area-inset-top));padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}#pf-overlay .pf-body{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}}
 @media(prefers-reduced-motion:reduce){#pf-overlay :is(input,select,textarea,.pf-button){transition:none}}
+
+#pf-overlay .pf-reference-panel {
+ border:1px solid #41604a;
+ border-radius:16px;
+ background:linear-gradient(145deg,#1a3425,#12291d);
+ padding:13px 14px;
+ margin:4px 0 18px;
+}
+#pf-overlay .pf-reference-panel > summary { color:#c7e7c5; font-weight:650; }
+#pf-overlay .pf-reference-panel .pf-ref-preview { min-height:90px; margin:0 0 12px; }
+#pf-overlay .pf-ref-source {
+ display:flex;
+ justify-content:space-between;
+ align-items:center;
+ gap:8px;
+ color:#c5d8ca;
+ overflow-wrap:anywhere;
+ margin-bottom:10px;
+}
+#pf-overlay .pf-ref-source .pf-button { flex-shrink:0; }
+#pf-overlay .pf-ref-row {
+ background:#102219;
+ border:1px solid var(--pf-line);
+ border-radius:12px;
+ padding:12px;
+ margin-bottom:10px;
+}
+#pf-overlay .pf-ref-row .pf-field:last-child { margin-bottom:0; }
+#pf-overlay .pf-ref-row-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; flex-shrink:0; max-width:55%; }
