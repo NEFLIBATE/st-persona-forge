@@ -13,7 +13,9 @@ const artifacts=await fs.mkdtemp(path.join(tmpdir(), 'persona-forge-ui-'));
 const mock = `
 window.fixture={failAI:false,failUpload:false,override:null,selected:'original',saves:0,requests:[]};
 const power={personas:{original:'原有用户'},persona_descriptions:{original:{description:'原有设定内容',title:'原设定'}},default_persona:'original'};
-const c={powerUserSettings:power,extensionSettings:{st_persona_forge_v1:{form:{gender:'旧版自填性别',details:{features:'旧版灰瞳',hooks:'旧版迟来的信'}}}},onlineStatus:'connected',characters:[{avatar:'current.png',name:'对手角色',description:'CHARACTER SECRET',scenario:'world'},{avatar:'cloud.png',name:'云霁',shallow:true}],getWorldInfoNames:()=>['青岚城','北境'],loadWorldInfo:async name=>fixture.books[name],characterId:0,getRequestHeaders:()=>({'Content-Type':'application/json','X-CSRF-Token':'test'}),saveSettingsDebounced:()=>fixture.saves++,eventTypes:{APP_READY:'ready'},eventSource:{on:(_e,fn)=>queueMicrotask(fn)},SlashCommand:{fromProps:x=>x},SlashCommandParser:{addCommandObject:x=>window.command=x},generateRaw:async(options={})=>{fixture.requests.push(options);if(fixture.failAI)throw new Error('模拟模型连接失败');if(fixture.override!==null)return fixture.override;return ['[PERSONA_NAME]','AI 林澈','[PERSONA_TITLE]','生成结果','[PERSONA_DESCRIPTION]','由AI生成的完整用户设定 {{user}} 与 {{char}}。'].join('\\n');},generateQuietPrompt:async(options={})=>{fixture.requests.push(options);return JSON.stringify({name:'上下文用户',description:'chat result'});}};
+const subscribers={};
+fixture.emit=(name)=>{for(const fn of subscribers[name]||[])fn();};
+const c={chatId:'first-chat',chat:[],powerUserSettings:power,extensionSettings:{st_persona_forge_v1:{form:{gender:'旧版自填性别',details:{features:'旧版灰瞳',hooks:'旧版迟来的信'}}}},onlineStatus:'connected',characters:[{avatar:'current.png',name:'对手角色',description:'CHARACTER SECRET',scenario:'world'},{avatar:'cloud.png',name:'云霁',shallow:true},{avatar:'world.png',name:'暮色群岛',data:{tags:['大世界'],description:'你是世界主持人，玩家可以自由探索地图和各方势力。'}}],getWorldInfoNames:()=>['青岚城','北境'],loadWorldInfo:async name=>fixture.books[name],characterId:0,getRequestHeaders:()=>({'Content-Type':'application/json','X-CSRF-Token':'test'}),saveSettingsDebounced:()=>fixture.saves++,eventTypes:{APP_READY:'ready',CHAT_CHANGED:'chat_changed',MESSAGE_RECEIVED:'message_received'},eventSource:{on:(event,fn)=>{if(event==='ready')queueMicrotask(fn);else(subscribers[event]??=[]).push(fn);}},SlashCommand:{fromProps:x=>x},SlashCommandParser:{addCommandObject:x=>window.command=x},generateRaw:async(options={})=>{fixture.requests.push(options);if(fixture.failAI)throw new Error('模拟模型连接失败');if(fixture.override!==null)return fixture.override;return ['[PERSONA_NAME]','AI 林澈','[PERSONA_TITLE]','生成结果','[PERSONA_DESCRIPTION]','由AI生成的完整用户设定 {{user}} 与 {{char}}。'].join('\\n');},generateQuietPrompt:async(options={})=>{fixture.requests.push(options);return JSON.stringify({name:'上下文用户',description:'chat result'});}};
 window.SillyTavern={getContext:()=>c};window.fixture.power=power;
 fixture.books={
  '青岚城':{entries:{42:{comment:'药铺与居民',key:['医疗'],content:'柳掌柜经营药铺，阿芷经常来帮忙。NPC_LORE_A'},43:{comment:'未选区域',content:'UNSELECTED_LORE'}}},
@@ -32,7 +34,7 @@ try{
   res.end(JSON.stringify({name:'云霁',data:{name:'云霁',description:'SECOND_CARD',first_mes:'MAIN_GREETING',alternate_greetings:['GREETING_ONE','GREETING_TWO'],group_only_greetings:['GROUP_GREETING'],extensions:{world:'青岚城'},character_book:{name:'旅行札记',entries:[{id:7,comment:'旧桥',keys:['桥'],content:'EMBEDDED_LORE'}]}}}));return;
  }
  const prefix='/scripts/extensions/third-party/st-persona-forge/';
- if(req.url.startsWith(prefix)) {const file=req.url.slice(prefix.length).split('?')[0];if(!['index.js','core.js','catalog.js','references.js','style.css'].includes(file)){res.statusCode=404;res.end();return;}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':'text/javascript');res.end(await fs.readFile(base+'/'+file));return;}
+ if(req.url.startsWith(prefix)) {const file=req.url.slice(prefix.length).split('?')[0];if(!['index.js','core.js','catalog.js','references.js','play-context.js','style.css'].includes(file)){res.statusCode=404;res.end();return;}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':'text/javascript');res.end(await fs.readFile(base+'/'+file));return;}
  res.statusCode=404;res.end();
 }catch(e){res.statusCode=500;res.end(String(e));}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -293,6 +295,79 @@ try {
  assert.equal(await page.locator('.pf-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
  await page.screenshot({path:path.join(artifacts,'references-mobile.png')});
  await page.locator('#pf-reference-panel > summary').click();
+ // Preview only visible messages, explicitly add them to a raw request, and detect scope.
+ await page.locator('#pf-reference-panel > summary').click();
+ await page.locator('#pf-ref-card').selectOption('avatar:world.png');
+ await page.locator('#pf-card-type-status').filter({hasText:'自动判断：大世界'}).waitFor();
+ assert.equal(await page.getByLabel('在世界中的身份与联系',{exact:true}).inputValue(),'与云霁一起查找旧信');
+ await page.locator('#pf-card-type').selectOption('multi');
+ await page.locator('#pf-card-type-status').filter({hasText:'已指定：多角色'}).waitFor();
+ await page.locator('#pf-template').click();
+ await page.locator('#pf-status').filter({hasText:'已载入中文模板'}).waitFor();
+ assert.match(await page.locator('#pf-description').inputValue(),/在群像中的位置/);
+ await page.locator('#pf-card-type').selectOption('auto');
+ await page.locator('#pf-card-type-status').filter({hasText:'自动判断：大世界'}).waitFor();
+ await page.locator('#pf-reference-panel > summary').click();
+ await page.evaluate(()=>{
+    const c = SillyTavern.getContext();
+    c.chat = [
+       {name:'系统', is_system:true, mes:'PRIVATE_SYSTEM'},
+       {name:'玩家', is_user:true, mes:'PLAYER_RECENT 我先查看地图'},
+       {name:'柳掌柜', mes:'<think>PRIVATE_THOUGHT</think>NPC_RECENT 请走水路', extra:{reasoning:'HIDDEN_EXTRA'}},
+       {name:'工具', mes:'TOOL_PAYLOAD', extra:{tool_invocations:[{}]}},
+    ];
+ });
+ await page.locator('#pf-chat-panel > summary').click();
+ await page.locator('#pf-chat-status').filter({hasText:'已读取 2 条消息'}).waitFor();
+ const previewText = await page.locator('#pf-chat-preview').inputValue();
+ assert.match(previewText,/玩家 · 玩家[\s\S]*PLAYER_RECENT[\s\S]*柳掌柜 · 角色[\s\S]*NPC_RECENT/);
+ assert.doesNotMatch(previewText,/PRIVATE_SYSTEM|PRIVATE_THOUGHT|HIDDEN_EXTRA|TOOL_PAYLOAD/);
+ await page.locator('#pf-generate').click();
+ await page.locator('#pf-status').filter({hasText:'生成完成'}).waitFor();
+ assert.doesNotMatch(await page.evaluate(()=>fixture.requests.at(-1).prompt),/PLAYER_RECENT|NPC_RECENT/);
+ await page.locator('#pf-chat-include').check();
+ await page.evaluate(()=>{
+    SillyTavern.getContext().chat.push({name:'阿芷',mes:'NEW_VISIBLE 码头见'});
+    fixture.emit('message_received');
+ });
+ assert.match(await page.locator('#pf-chat-preview').inputValue(),/NEW_VISIBLE/);
+ await page.locator('#pf-generate').click();
+ await page.locator('#pf-status').filter({hasText:'生成完成'}).waitFor();
+ const withChat = await page.evaluate(()=>fixture.requests.at(-1).prompt);
+ assert.match(withChat,/PLAYER_RECENT[\s\S]*NPC_RECENT[\s\S]*NEW_VISIBLE/);
+ assert.match(withChat,/大世界：围绕玩家在世界中的身份/);
+ assert.doesNotMatch(withChat,/PRIVATE_SYSTEM|PRIVATE_THOUGHT|HIDDEN_EXTRA|TOOL_PAYLOAD/);
+ assert.doesNotMatch(await page.evaluate(()=>JSON.stringify(SillyTavern.getContext().extensionSettings)),/PLAYER_RECENT|NPC_RECENT/);
+ await page.evaluate(()=>{
+    const c = SillyTavern.getContext();
+    c.chatId = 'second-chat';
+    c.chat = [{name:'沈舟',mes:'SECOND_CHAT_TOKEN'}];
+    fixture.emit('chat_changed');
+ });
+ assert.equal(await page.locator('#pf-chat-include').isChecked(),false);
+ assert.match(await page.locator('#pf-chat-preview').inputValue(),/SECOND_CHAT_TOKEN/);
+ await page.locator('#pf-generate').click();
+ await page.locator('#pf-status').filter({hasText:'生成完成'}).waitFor();
+ assert.doesNotMatch(await page.evaluate(()=>fixture.requests.at(-1).prompt),/SECOND_CHAT_TOKEN|PLAYER_RECENT/);
+ await page.locator('#pf-mode').selectOption('chat');
+ assert.equal(await page.locator('#pf-chat-include-field').isVisible(),false);
+ await page.locator('#pf-generate').click();
+ await page.locator('#pf-status').filter({hasText:'生成完成'}).waitFor();
+ assert.doesNotMatch(await page.evaluate(()=>fixture.requests.at(-1).quietPrompt),/当前聊天摘录|SECOND_CHAT_TOKEN/);
+ await page.locator('#pf-mode').selectOption('raw');
+ await page.locator('#pf-reference-panel > summary').click();
+ await page.locator('#pf-ref-card').selectOption('');
+ await page.evaluate(()=>{
+    SillyTavern.getContext().groupId = 'test-group';
+    fixture.emit('chat_changed');
+ });
+ await page.locator('#pf-card-type-status').filter({hasText:'自动判断：多角色'}).waitFor();
+ await page.evaluate(()=>{
+    delete SillyTavern.getContext().groupId;
+    fixture.emit('chat_changed');
+ });
+ await page.locator('#pf-reference-panel > summary').click();
+ await page.locator('#pf-chat-panel > summary').click();
  // Mobile full-page, navigation and viewport resize regressions.
  for(const size of [{width:360,height:800},{width:393,height:760},{width:320,height:568},{width:800,height:360}]){
   await page.setViewportSize(size);
@@ -344,5 +419,5 @@ try {
  await preview.locator('#pf-nav-create').click();
  await preview.screenshot({path:path.join(artifacts,'forest-mobile.png')});
  await preview.close();
- console.log(JSON.stringify({passed:true,artifacts,checks:['marker text generation','truncated JSON recovery and warning','malformed JSON recovery','invalid response preserves editor','raw response persistence and download','one model call per click','120 optional detail inputs','facts in template and AI request','detail clear and undo','detail persistence','full dossier length','desktop mount','64 selectable world templates plus custom','192 professions','120 multi-select traits','120 relationship options','search, categories and more choices','theme recommendations preserve user input','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','shallow cards and chosen greeting','native and embedded books','NPCs across books','missing lore preserves editor','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
+ console.log(JSON.stringify({passed:true,artifacts,checks:['marker text generation','truncated JSON recovery and warning','malformed JSON recovery','invalid response preserves editor','raw response persistence and download','one model call per click','120 optional detail inputs','facts in template and AI request','detail clear and undo','detail persistence','full dossier length','desktop mount','64 selectable world templates plus custom','192 professions','120 multi-select traits','120 relationship options','search, categories and more choices','theme recommendations preserve user input','gender dropdown','custom gender','legacy gender migration','template','draft','native JSON export','actual browser multipart upload','no auto-switch by default','upload failure preserves persona count','AI failure preserves editor','AI object API','opt-in character context','shallow cards and chosen greeting','native and embedded books','NPCs across books','missing lore preserves editor','card type auto and manual','selected chat excerpts','chat consent reset','no duplicate quiet-mode chat','JSON import/XSS','reopen persistence','full-viewport native modal','hostile theme isolation','transformed body isolation','320/360/393px and landscape layouts','section navigation','reduced viewport height','scroll restoration','automatic editor reveal','Escape close'],uploads,pageErrors:errors},null,2));
 } catch(e){console.log(await page.locator('#pf-status').textContent());console.log(await page.evaluate(()=>({modelCalls:fixture.requests.length})));console.log(errors);await page.screenshot({path:path.join(artifacts, 'fullpage-failure.png')});throw e;} finally {await browser.close();server.close();}
