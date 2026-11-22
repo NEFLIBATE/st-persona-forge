@@ -1,3 +1,5 @@
+import { detectCardType } from './play-context.js';
+
 const MAX_NPCS = 20;
 const MAX_LORE = 12;
 const clean = (value, limit) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
@@ -72,7 +74,7 @@ export function referencesPanel() {
         <p class="pf-muted" id="pf-ref-book-status" role="status"></p>
         <div id="pf-ref-lore-list"></div>
         <div class="pf-detail-heading"><strong>NPC 关系</strong><small id="pf-ref-npc-count"></small></div>
-        <p class="pf-muted">姓名和关系都填好后才会写入设定。上方“与对方角色的关系”对应主角色。</p>
+        <p class="pf-muted" id="pf-npc-relation-hint">姓名和关系都填好后才会写入设定。</p>
         <div id="pf-ref-npcs"></div>
         <button type="button" class="pf-button pf-small" id="pf-ref-manual">手动添加 NPC</button>
         <p class="pf-muted">AI 生成会把选取的角色、开场白和条目摘录发送给当前模型。这里的选择仅用于 Persona 创作。</p>
@@ -80,7 +82,7 @@ export function referencesPanel() {
     </details>`;
 }
 
-export function mountReferences({ get, context, state, save, guard, isBusy }) {
+export function mountReferences({ get, context, state, save, guard, isBusy, onTypeChange }) {
     let card = null;
     let book = null;
     let worldNames = [];
@@ -99,11 +101,31 @@ export function mountReferences({ get, context, state, save, guard, isBusy }) {
     };
     const cardList = () => Object.entries(context().characters || {}).filter(([, item]) => item?.name || item?.data?.name)
         .map(([key, item]) => ({ id: item.avatar ? `avatar:${item.avatar}` : `slot:${key}`, key, item }));
-    const activeCard = () => {
+    const isGroup = c => c.groupId != null && c.groupId !== '' && c.groupId !== false;
+    const selectedCard = () => cardList().find(record => record.id === refs.card);
+    const currentCard = () => {
         const c = context();
-        if (refs.card) return cardList().find(record => record.id === refs.card);
-        if (state.form.characterContext && !c.groupId) return cardList().find(record => record.key === String(c.characterId));
+        if (!isGroup(c)) return cardList().find(record => record.key === String(c.characterId));
     };
+    const activeCard = () => refs.card ? selectedCard() : (state.form.characterContext ? currentCard() : undefined);
+
+    function profileFor(record, data) {
+        const c = context();
+        if (!refs.card && isGroup(c)) {
+            return { ...detectCardType(null, true), source: `group:${c.groupId}` };
+        }
+        const item = data || record?.item;
+        return {
+            ...detectCardType(item),
+            source: record?.id || refs.card || '',
+            name: item?.data?.name || item?.name || '',
+        };
+    }
+
+    function currentProfile() {
+        const record = refs.card ? selectedCard() : currentCard();
+        return profileFor(record, record && card?.id === record.id ? card.data : null);
+    }
 
     async function readCard(record) {
         if (!record) throw new Error('所选角色卡不在当前列表中，请重新选择。');
@@ -155,6 +177,7 @@ export function mountReferences({ get, context, state, save, guard, isBusy }) {
         setOptions(greetingSelect, '不参考开场白', []);
         refreshGreeting();
         const record = activeCard();
+        onTypeChange();
         const info = get('ref-card-status');
         if (!record && !refs.card && !state.form.characterContext) {
             info.textContent = '';
@@ -188,6 +211,7 @@ export function mountReferences({ get, context, state, save, guard, isBusy }) {
             }
         }
         if (run !== cardRun) return;
+        onTypeChange();
         renderBooks();
         await refreshBook();
     }
@@ -413,21 +437,23 @@ export function mountReferences({ get, context, state, save, guard, isBusy }) {
 
     async function getLocal() {
         const record = activeCard();
-        const greeting = record?.id === refs.greetingCard && refs.greeting
-            ? cardGreetings(await readCard(record)).find(item => item.id === refs.greeting)
+        const data = record && (card?.id === record.id ? card.data : await readCard(record));
+        const greeting = record?.id === refs.greetingCard
+            ? cardGreetings(data).find(item => item.id === refs.greeting)
             : null;
-        const data = record?.item;
         return {
             character: data ? { name: data.data?.name || data.name } : null,
             greeting: greeting ? { label: greeting.label } : null,
             npcs: npcRelationships(refs.npcs),
+            profile: data ? profileFor(record, data) : currentProfile(),
         };
     }
 
     async function collect() {
         const snapshot = normalizeReferences(refs);
         const record = activeCard();
-        const data = snapshot.card || state.form.characterContext ? await readCard(record) : null;
+        const data = snapshot.card || (state.form.characterContext && !isGroup(context())) ? await readCard(record) : null;
+        const profile = data ? profileFor(record, data) : currentProfile();
         const character = data ? {
             name: data.data?.name || data.name,
             description: data.data?.description || data.description,
@@ -435,7 +461,7 @@ export function mountReferences({ get, context, state, save, guard, isBusy }) {
             personality: data.data?.personality || data.personality,
         } : null;
         const greeting = record?.id === snapshot.greetingCard && cardGreetings(data).find(item => item.id === snapshot.greeting);
-        if (snapshot.greeting && !greeting) throw new Error('找不到所选开场白，请重新选择。');
+        if (snapshot.greeting && !greeting && (record || snapshot.card)) throw new Error('找不到所选开场白，请重新选择。');
         const npcs = npcRelationships(snapshot.npcs);
         const sources = [...snapshot.lore, ...npcs.map(row => row.source).filter(Boolean)];
         const books = new Map();
@@ -450,8 +476,8 @@ export function mountReferences({ get, context, state, save, guard, isBusy }) {
             if (!entry) throw new Error(`找不到世界书条目「${item.label}」，请移除该参考，或为对应 NPC 解除来源。`);
             lore.push({ ...item, content: entry.content.trim().slice(0, 700) });
         }
-        return { character, greeting, npcs, lore };
+        return { character, greeting, npcs, lore, profile };
     }
 
-    return { refresh, collect, getLocal };
+    return { refresh, collect, getLocal, currentProfile };
 }

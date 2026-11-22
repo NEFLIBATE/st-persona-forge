@@ -1,3 +1,4 @@
+import { chatKey, appliedCardType, mountPlayContext, normalizeCardTypeOverride, playContextPanel } from './play-context.js';
 import { mountReferences, normalizeReferences, referencesPanel } from './references.js';
 import { WORLD_GROUPS, CHOICE_GROUPS, getChoiceOptions, toggleTrait } from './catalog.js';
 import { THEMES, GENDERS, DETAIL_GROUPS, DETAIL_FIELDS, getDetails, DEFAULT_FORM, MAX_DESCRIPTION, uid, normalizePersona, makeTemplate, buildPrompt, toNativeBackup, parseImport, safeFilename, requestGeneration, parseGenerationResult, getGenerationBudget } from './core.js';
@@ -8,7 +9,7 @@ let root, state, busy = false, imageFile = null, imageURL = '', previousFocus, p
 let saveTimer;
 let scrollLocks = null;
 let detailUndo = null;
-let references;
+let references, playContext;
 let detailOpenBeforeFilter = null;
 const choiceLimits = { identity: 36, traits: 36, relation: 36 };
 const $ = id => root.querySelector(`#pf-${id}`);
@@ -27,6 +28,7 @@ function settings() {
     }
     stored.form.details = getDetails(stored.form);
     stored.references = normalizeReferences(stored.references);
+    stored.cardTypeOverride = normalizeCardTypeOverride(stored.cardTypeOverride);
     stored.current = { ...defaults.current, ...stored.current };
     stored.lastOutput = typeof stored.lastOutput === 'string' ? stored.lastOutput.slice(0, 100000) : '';
     stored.lastOutputAt = typeof stored.lastOutputAt === 'string' ? stored.lastOutputAt : '';
@@ -209,10 +211,17 @@ async function generate() {
     if (c.onlineStatus === 'no_connection') throw new Error('请先在酒馆连接可用的模型 API，或使用免 API 模板。');
     const form = { ...state.form }, current = readEditor();
     const length = getGenerationBudget(form.length);
+    const sourceChat = chatKey(c);
+    const chat = playContext.messagesForGeneration();
     setBusy(true); status('正在读取已选创作参考…');
     let received = false;
     try {
         const refs = await references.collect();
+        if ((form.mode === 'chat' || chat.length) && chatKey(context()) !== sourceChat) {
+            throw new Error('生成前切换了聊天，请确认当前聊天后再生成。');
+        }
+        refs.cardType = appliedCardType(refs.profile, state.cardTypeOverride);
+        refs.chat = chat;
         const prompt = buildPrompt(form, current.name && current.description ? current : null, refs.character, refs);
         status('正在使用酒馆当前连接生成，请稍候。可关闭窗口，结果会保留。');
         const result = await requestGeneration(c, form.mode, prompt, length);
@@ -295,11 +304,14 @@ function open() {
     if (typeof root.showModal === 'function') root.showModal();
     else root.setAttribute('open', '');
     $('page-content').scrollTop = 0;
+    playContext.onOpen();
+    if (!busy && ($('reference-panel').open || state.references.card || state.form.characterContext)) guard(references.refresh);
     const connected = context().onlineStatus && context().onlineStatus !== 'no_connection';
     $('connection').textContent = connected ? '模型已连接' : '未连接模型 · 可用模板';
     refreshPersonas(); $('close').focus({ preventScroll: true });
 }
 function close() {
+    playContext.onClose();
     syncEditor(); persist();
     if (typeof root.close === 'function') root.close(); else root.removeAttribute('open');
     root.hidden = true; root.classList.add('pf-hidden');
@@ -314,7 +326,7 @@ function initialize() {
     state = settings();
     const pageHost = document.createElement('div'); pageHost.id = 'pf-host';
     const shadow = pageHost.attachShadow({ mode: 'open' });
-    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.7.0', import.meta.url).href;
+    const sheet = document.createElement('link'); sheet.rel = 'stylesheet'; sheet.href = new URL('./style.css?v=1.8.0', import.meta.url).href;
     const critical = document.createElement('style');
     critical.textContent = ':host{all:initial}:where(dialog#pf-overlay){position:fixed;inset:0;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100%;height:100dvh;background:#0b1914;color:#ecf5ef}dialog#pf-overlay[hidden]{display:none!important}';
     shadow.append(critical, sheet);
@@ -334,10 +346,11 @@ function initialize() {
       <label class="pf-field" id="pf-gender-custom-field" hidden><span>自定义性别</span><input id="pf-genderCustom" maxlength="100" placeholder="填写性别，或留空由 AI 设定"></label>
       ${field('identity', '身份／职业', '例如：隐瞒身份的旅行医师')}${choicePanel('identity')}${field('traits', '性格关键词', '例如：慢热、嘴硬心软、警惕心强')}${choicePanel('traits')}${field('relation', '与对方角色的关系', '例如：失联后重逢的旧友')}${choicePanel('relation')}
       ${referencesPanel()}
+      ${playContextPanel()}
       <label class="pf-field"><span>背景、能力与其他要求</span><textarea id="pf-keywords" rows="3" maxlength="4000" placeholder="想保留的经历、弱点、目标、世界规则…"></textarea></label>
       ${detailPanel()}
       <div class="pf-grid"><label class="pf-field"><span>输出语言</span><select id="pf-language"><option>简体中文</option><option>繁體中文</option><option>English</option></select></label><label class="pf-field"><span>设定篇幅</span><select id="pf-length"><option value="short">精简</option><option value="standard">标准</option><option value="detailed">详细</option><option value="dossier">完整档案</option><option value="ultra">超细档案 · 2800–4000字</option></select></label></div>
-      <details class="pf-details"><summary>生成参考与连接</summary><label class="pf-field"><span>生成模式</span><select id="pf-mode"><option value="raw">独立创作（不读取聊天）</option><option value="chat">沿用当前聊天上下文与预设</option></select></label><p class="pf-muted">AI 使用酒馆当前连接和模型参数。上下文模式会把当前聊天、用户设定等参考内容发送给该模型；独立模式不会主动读取聊天。</p></details>
+      <details class="pf-details"><summary>生成参考与连接</summary><label class="pf-field"><span>生成模式</span><select id="pf-mode"><option value="raw">独立创作</option><option value="chat">沿用聊天与预设</option></select></label><p class="pf-muted">AI 使用酒馆当前连接和模型参数。上下文模式会把当前聊天、用户设定等参考内容发送给该模型；独立模式可在「预览当前聊天」中勾选加入消息摘录。</p></details>
       <div class="pf-actions">${button('generate', '✦ AI 生成／完善', 'pf-primary')}${button('template', '免 API 中文模板')}</div>
       <p class="pf-muted">AI 生成会参考编辑器已有内容。想从头创作时，先点“新建设定”。</p>
       <details class="pf-details"><summary>从酒馆读取已有用户设定</summary><select id="pf-existing" aria-label="已有用户设定"></select><div class="pf-actions">${button('load-existing', '读取到编辑器')}${button('refresh', '刷新列表')}</div><p class="pf-muted">读取后可完善并保存为新设定。</p></details>
@@ -352,7 +365,7 @@ function initialize() {
       <div class="pf-actions pf-export">${button('export', '导出酒馆 JSON')}${button('txt', '导出 TXT')}${button('import', '导入 JSON')}<input id="pf-file" type="file" accept=".json,application/json" hidden></div>
       <details class="pf-details" id="pf-model-output"><summary>上次模型原始输出</summary><p class="pf-muted">遇到格式异常时可查看或下载，用于找回模型已经生成的内容。最多保留100000字符。</p><p class="pf-muted" id="pf-raw-info"></p><textarea id="pf-raw-output" rows="5" readonly aria-label="上次模型原始输出"></textarea><div class="pf-actions">${button('download-output', '下载原始输出')}</div></details>
       <details class="pf-details"><summary id="pf-open-help">使用说明</summary><p>生成后检查姓名和描述，点击“新增到酒馆”即可创建独立用户设定。无头像时会自动创建姓名首字头像。JSON 可在酒馆“用户设定管理 → 恢复”中导入；头像不包含在 JSON 内。模板按钮提供中文起稿，AI 按所选语言创作。</p><p>草稿保存在酒馆设置内，头像只保留到关闭或刷新页面前；需要迁移时请导出 JSON。新增后切换可能触发酒馆自身的首条消息刷新或自动锁定行为。</p></details>
-      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.7.0</span></footer>
+      </div></div><footer><span class="pf-status" id="pf-status" role="status" aria-live="polite">准备好开始一个新身份。</span><span class="pf-version">v1.8.0</span></footer>
     </section>`;
     for (const group of WORLD_GROUPS) {
         const element = document.createElement('optgroup'); element.label = group.label;
@@ -366,7 +379,14 @@ function initialize() {
         if (el.type === 'checkbox') el.checked = Boolean(state.form[key]); else el.value = state.form[key];
         el.addEventListener('input', () => { state.form[key] = el.type === 'checkbox' ? el.checked : el.value; if (key === 'gender') syncGenderField(); if (key === 'theme') { syncThemeField(); choiceLimits.identity = 36; renderChoices('identity'); } if (CHOICE_GROUPS[key]) syncChoiceSelection(key); queueSave(); });
     }
-    references = mountReferences({ get: $, context, state, save: queueSave, guard, isBusy: () => busy });
+    references = mountReferences({
+        get: $, context, state, save: queueSave, guard, isBusy: () => busy,
+        onTypeChange: () => playContext?.refreshType(),
+    });
+    playContext = mountPlayContext({
+        get: $, context, state, save: queueSave, isOpen: () => root.open,
+        readType: references.currentProfile,
+    });
     syncGenderField(); syncThemeField();
     for (const kind of Object.keys(CHOICE_GROUPS)) renderChoices(kind);
     for (const [key] of DETAIL_FIELDS) {
@@ -410,7 +430,9 @@ function initialize() {
         if (busy) return;
         setBusy(true);
         try {
-            replaceEditor(makeTemplate(state.form, await references.getLocal()));
+            const refs = await references.getLocal();
+            refs.cardType = appliedCardType(refs.profile, state.cardTypeOverride);
+            replaceEditor(makeTemplate(state.form, refs));
             revealEditor();
             status('已载入中文模板，可编辑后保存，或让 AI 进一步完善。');
         } finally { setBusy(false); }

@@ -163,3 +163,14 @@
 }
 #pf-overlay .pf-ref-row .pf-field:last-child { margin-bottom:0; }
 #pf-overlay .pf-ref-row-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; flex-shrink:0; max-width:55%; }
+
+#pf-overlay .pf-play-context {
+ border:1px solid var(--pf-line);
+ border-radius:16px;
+ padding:14px;
+ background:linear-gradient(145deg,#1a3425,#12291d);
+ margin:5px 0 18px;
+}
+#pf-overlay #pf-chat-panel { margin-bottom:0; padding-bottom:0; }
+#pf-overlay #pf-chat-refresh { align-self:center; justify-self:start; }
+#pf-overlay #pf-chat-preview { margin-bottom:12px; }
